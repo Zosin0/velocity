@@ -30,6 +30,7 @@ add_executable(velocity_unit_tests
     decoder_tests.cpp
     gpu_tests.cpp
     audio_tests.cpp
+    model_tests.cpp
 )
 target_link_libraries(velocity_unit_tests PRIVATE
     velocity_options
@@ -37,6 +38,7 @@ target_link_libraries(velocity_unit_tests PRIVATE
     velocity::media
     velocity::gpu
     velocity::audio
+    velocity::engine
     GTest::gtest_main
 )
 add_dependencies(velocity_unit_tests velocity_testmedia)
