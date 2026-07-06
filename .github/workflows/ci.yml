@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache external toolchain deps
+        uses: actions/cache@v4
+        with:
+          path: external
+          key: external-${{ hashFiles('tools/setup-devenv.ps1') }}
+
+      - name: Fetch portable SDK + FFmpeg
+        shell: powershell
+        run: tools/setup-devenv.ps1
+
+      - name: Configure
+        shell: powershell
+        run: |
+          . tools/devshell.ps1
+          cmake --preset release
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Build
+        shell: powershell
+        run: |
+          . tools/devshell.ps1
+          cmake --build --preset release
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Test
+        shell: powershell
+        run: |
+          . tools/devshell.ps1
+          ctest --preset release
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Launch smoke check
+        shell: powershell
+        run: |
+          ./build/release/bin/velocity.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
