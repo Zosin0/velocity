@@ -5,10 +5,22 @@
 
 ## Current state (last verified: 2026-07-06, session 1)
 
-- **Phase:** Phase 0 (scaffold) **COMPLETE**. Next: Phase 1 risk spikes.
-- **Build:** `release` and `dev` presets build clean (MSVC 14.44, /W4 /WX).
-- **Tests:** 9/9 pass via `ctest --preset release` (rational-time math + FFmpeg integration smoke).
-- **App:** `build/release/bin/velocity.exe` launches, logs FFmpeg runtime versions, exits 0.
+- **Phase:** Phase 1 (risk spikes) **COMPLETE**. Next: Phase 2 thin end-to-end slice.
+- **Build:** `dev` preset builds clean (MSVC 14.44, /W4 /WX).
+- **Tests:** 21/21 pass via `ctest --preset dev`:
+  - rational time (exact NTSC math), FFmpeg integration smoke
+  - Spike A: probe + VideoDecoder — sequential frame counts exact, pts monotonic,
+    `readFrameAt` == sequential scan, D3D11VA hw decode pts == sw (ran on RTX 5060)
+  - Spike B: D3D12 device (hw + WARP fallback), clear→readback pixel-exact,
+    flip-model swapchain presents on a real Win32 window
+  - Spike C: WASAPI shared-mode output plays a tone, IAudioClock advances at
+    wall rate (±10 %), ≤2 underruns — viable playback master clock
+- **App:** `velocity.exe` launches, logs FFmpeg runtime versions, exits 0.
+- **Spike A zero-copy status:** hw decode produces D3D11 textures; the
+  D3D11→D3D12 shared-handle import into the renderer is NOT wired yet (allowed
+  fallback per execution prompt). Current path for hw frames is transfer-to-CPU.
+  Wire the zero-copy (or measured copy) path in Phase 2 when the render graph
+  consumes decoded frames.
 
 ### How to build (any session, this machine)
 ```powershell
@@ -55,15 +67,21 @@ cmake --preset dev && cmake --build --preset dev && ctest --preset dev
 
 ## Next concrete unit of work
 
-**Phase 1, Spike A:** FFmpeg H.264 decode of a real MP4 → CPU frame with
-correct pts (uses `media/` + rational time), then hardware `d3d11va` decode
-path → D3D11 texture. Acceptance test: decode frame N by index == decode frame
-N sequentially (pts equality) on a generated test asset (generate tiny test
-MP4s with the bundled `external/ffmpeg/bin/ffmpeg.exe` into `build/testmedia/`
-— do NOT commit media binaries).
-
-Then Spike B (Win32 window + DXGI flip-model swapchain — note: Qt decision
-pending, spike uses raw Win32 deliberately), then Spike C (WASAPI clock).
+**Phase 2 — thin end-to-end slice**, in these units (each: build+test before next):
+1. `engine/model`: TimelineSnapshot (immutable, shared_ptr nodes), Sequence/
+   Track/Clip with tick math; commands: add clip, split clip; undo stack.
+   Pure-CPU unit tests (no media needed).
+2. `engine/compile`: snapshot + tick → "what source frame shows at this tick"
+   (single video track + single audio track resolution). Unit tests.
+3. Export slice: model+compiler+decoder+encoder → MP4 H.264 (hw encoder w/
+   openh264 fallback) + AAC audio; **doc-10 gates as tests**: exact frame
+   count, duration, A/V both present. (Export before playback: it's testable
+   headless and exercises the same pipeline.)
+4. Playback slice: Win32 window + swapchain + decoder + WASAPI, audio-master
+   clock, play/pause/seek on a cuts-only timeline. Manual-run target
+   (`velocity.exe <file>`) + automated clock-sync test where possible.
+5. Wire hw-decode surfaces into the preview path (zero-copy D3D11→D3D12
+   import, or measured-copy fallback — document whichever ships).
 
 ## Session log
 
@@ -72,3 +90,9 @@ pending, spike uses raw Win32 deliberately), then Spike C (WASAPI clock).
   FFmpeg imported targets, foundation lib (rational time + logging), media lib
   (FFmpeg smoke), velocity.exe launch/exit, 9 unit tests, GitHub Actions CI,
   this file. Discovered + worked around Smart App Control (see constraints).
+- **2026-07-06 (session 1, cont.):** Phase 1 complete — Spike A (probe +
+  frame-accurate decoder, sw + D3D11VA), Spike B (D3D12 device/readback/
+  swapchain + Win32 window), Spike C (WASAPI output + master-clock property).
+  21/21 tests. Machine facts: RTX 5060 + Intel UHD 770; FFmpeg build has
+  libopenh264 (deterministic h264 test fixtures + software export fallback)
+  and h264_nvenc/qsv/amf for hardware export.

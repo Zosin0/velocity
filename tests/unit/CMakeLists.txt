@@ -28,11 +28,15 @@ add_executable(velocity_unit_tests
     time_tests.cpp
     media_tests.cpp
     decoder_tests.cpp
+    gpu_tests.cpp
+    audio_tests.cpp
 )
 target_link_libraries(velocity_unit_tests PRIVATE
     velocity_options
     velocity::foundation
     velocity::media
+    velocity::gpu
+    velocity::audio
     GTest::gtest_main
 )
 add_dependencies(velocity_unit_tests velocity_testmedia)

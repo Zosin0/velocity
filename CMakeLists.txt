@@ -28,5 +28,7 @@ enable_testing()
 
 add_subdirectory(src/foundation)
 add_subdirectory(src/media)
+add_subdirectory(src/gpu)
+add_subdirectory(src/audio)
 add_subdirectory(src/main)
 add_subdirectory(tests/unit)
