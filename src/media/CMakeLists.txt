@@ -1,5 +1,7 @@
 add_library(velocity_media STATIC
     src/ffmpeg_info.cpp
+    src/probe.cpp
+    src/video_decoder.cpp
 )
 target_include_directories(velocity_media PUBLIC include)
 target_link_libraries(velocity_media

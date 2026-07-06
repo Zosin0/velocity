@@ -18,7 +18,7 @@ target_compile_options(velocity_options INTERFACE
     $<$<CONFIG:Release>:/O2 /GS>
 )
 target_compile_definitions(velocity_options INTERFACE
-    WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE
+    WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS
 )
 
 include(cmake/deps.cmake)
