@@ -28,6 +28,10 @@ public:
     [[nodiscard]] Rational timebase() const;
     [[nodiscard]] bool isHardware() const;
 
+    // Raw AVPixelFormat value. For use by other src/media components only;
+    // code outside media/ must not interpret it.
+    [[nodiscard]] int pixelFormatInt() const;
+
     // CPU frames only. Planes follow the pixel format (yuv420p/nv12).
     [[nodiscard]] const std::uint8_t* data(int plane) const;
     [[nodiscard]] int stride(int plane) const;

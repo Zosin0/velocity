@@ -49,6 +49,7 @@ std::int64_t VideoFrame::pts() const { return impl_->frame->best_effort_timestam
 std::int64_t VideoFrame::duration() const { return impl_->frame->duration; }
 Rational VideoFrame::timebase() const { return impl_->tb; }
 bool VideoFrame::isHardware() const { return impl_->frame->format == AV_PIX_FMT_D3D11; }
+int VideoFrame::pixelFormatInt() const { return impl_->frame->format; }
 const std::uint8_t* VideoFrame::data(int plane) const { return impl_->frame->data[plane]; }
 int VideoFrame::stride(int plane) const { return impl_->frame->linesize[plane]; }
 
