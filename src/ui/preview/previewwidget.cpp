@@ -75,6 +75,40 @@ static QImage convertVideoFrameToQImage(const velocity::media::VideoFrame& frame
                 line[x] = qRgb(r, g, b);
             }
         }
+    } else if (fmt == 26) { // AV_PIX_FMT_RGBA — image imports (PNG/WebP)
+        const std::uint8_t* src = cpuFrame.data(0);
+        const int stride = cpuFrame.stride(0);
+        QImage rgba(w, h, QImage::Format_RGBA8888);
+        for (int y = 0; y < h; ++y)
+            memcpy(rgba.scanLine(y), src + static_cast<size_t>(y) * stride,
+                   static_cast<size_t>(w) * 4);
+        return rgba;
+    } else if (fmt == 2) { // AV_PIX_FMT_RGB24 — JPEG and friends
+        const std::uint8_t* src = cpuFrame.data(0);
+        const int stride = cpuFrame.stride(0);
+        QImage rgb(w, h, QImage::Format_RGB888);
+        for (int y = 0; y < h; ++y)
+            memcpy(rgb.scanLine(y), src + static_cast<size_t>(y) * stride,
+                   static_cast<size_t>(w) * 3);
+        return rgb.convertToFormat(QImage::Format_RGB32);
+    } else if (fmt == 12) { // AV_PIX_FMT_YUVJ420P — full-range JPEG luma
+        // Same layout as yuv420p; the BT.601 math above is close enough for
+        // preview purposes (exact color management is the render-graph pass).
+        const std::uint8_t* yData = cpuFrame.data(0);
+        const std::uint8_t* uData = cpuFrame.data(1);
+        const std::uint8_t* vData = cpuFrame.data(2);
+        for (int y = 0; y < h; ++y) {
+            QRgb* line = reinterpret_cast<QRgb*>(img.scanLine(y));
+            for (int x = 0; x < w; ++x) {
+                int yVal = yData[y * cpuFrame.stride(0) + x];
+                int uVal = uData[(y / 2) * cpuFrame.stride(1) + (x / 2)] - 128;
+                int vVal = vData[(y / 2) * cpuFrame.stride(2) + (x / 2)] - 128;
+                int r = std::clamp(static_cast<int>(yVal + 1.402 * vVal), 0, 255);
+                int g = std::clamp(static_cast<int>(yVal - 0.344136 * uVal - 0.714136 * vVal), 0, 255);
+                int b = std::clamp(static_cast<int>(yVal + 1.772 * uVal), 0, 255);
+                line[x] = qRgb(r, g, b);
+            }
+        }
     } else {
         img.fill(Qt::black);
     }
