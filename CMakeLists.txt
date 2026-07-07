@@ -23,6 +23,7 @@ target_compile_definitions(velocity_options INTERFACE
 
 include(cmake/deps.cmake)
 include(cmake/ffmpeg.cmake)
+include(cmake/qt.cmake)
 
 enable_testing()
 
@@ -31,5 +32,6 @@ add_subdirectory(src/media)
 add_subdirectory(src/gpu)
 add_subdirectory(src/audio)
 add_subdirectory(src/engine)
+add_subdirectory(src/ui)
 add_subdirectory(src/main)
 add_subdirectory(tests/unit)

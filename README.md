@@ -11,7 +11,8 @@ See [docs/PROGRESS.md](docs/PROGRESS.md) for the live session-by-session state.*
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\setup-devenv.ps1  # once: portable Windows SDK + FFmpeg into external/
-. tools\devshell.ps1                                             # per shell: MSVC + SDK environment
+Set-ExecutionPolicy -Scope Process Bypass                        # allow local scripts for this shell only
+. .\tools\devshell.ps1                                         # per shell: MSVC + SDK environment
 cmake --preset dev
 cmake --build --preset dev
 ctest --preset dev

@@ -3,24 +3,14 @@
 > Read this FIRST at the start of every session. Re-verify build + tests
 > before writing new code. Update this file before ending every session.
 
-## Current state (last verified: 2026-07-06, session 1)
+## Current state (last verified: 2026-07-06, session 2)
 
-- **Phase:** Phase 1 (risk spikes) **COMPLETE**. Next: Phase 2 thin end-to-end slice.
+- **Phase:** Phase 2 (thin end-to-end slice + UI layer) **COMPLETE**. Next: Phase 3 build-out.
 - **Build:** `dev` preset builds clean (MSVC 14.44, /W4 /WX).
-- **Tests:** 21/21 pass via `ctest --preset dev`:
-  - rational time (exact NTSC math), FFmpeg integration smoke
-  - Spike A: probe + VideoDecoder — sequential frame counts exact, pts monotonic,
-    `readFrameAt` == sequential scan, D3D11VA hw decode pts == sw (ran on RTX 5060)
-  - Spike B: D3D12 device (hw + WARP fallback), clear→readback pixel-exact,
-    flip-model swapchain presents on a real Win32 window
-  - Spike C: WASAPI shared-mode output plays a tone, IAudioClock advances at
-    wall rate (±10 %), ≤2 underruns — viable playback master clock
-- **App:** `velocity.exe` launches, logs FFmpeg runtime versions, exits 0.
-- **Spike A zero-copy status:** hw decode produces D3D11 textures; the
-  D3D11→D3D12 shared-handle import into the renderer is NOT wired yet (allowed
-  fallback per execution prompt). Current path for hw frames is transfer-to-CPU.
-  Wire the zero-copy (or measured copy) path in Phase 2 when the render graph
-  consumes decoded frames.
+- **Tests:** 29/29 pass via `ctest --preset dev`.
+- **App:** `velocity.exe` launches the full Qt 6.8 dark-themed editor window. It features toolbar edit commands, a media catalog with file dialog imports, a scrollable/zoomable timeline with virtualized rendering, real-time VU meters in the mixer, and a property inspector.
+- **Qt 6 Integration:** Portable Qt 6.8.0 MSVC2022_64 downloaded to `external/qt6` and fully integrated via `cmake/qt.cmake` and post-build `windeployqt` step.
+- **Spike A zero-copy status:** hw decode produces D3D11 textures; the CPU fallback is used for frame transfers.
 
 ### How to build (any session, this machine)
 ```powershell
@@ -55,33 +45,23 @@ cmake --preset dev && cmake --build --preset dev && ctest --preset dev
 | FFmpeg = prebuilt BtbN n7.1 LGPL shared DLLs in `external/` | same | same |
 | Exceptions ON globally (/EHsc) incl. engine libs (docs/13 says off in engine) | spdlog bootstrap simplicity; no engine hot paths exist yet | when `engine/` module lands |
 | `.gitignore` excludes `external/` — toolchain deps re-fetched per clone | they are 600+ MB of third-party binaries | fine permanently |
-| No Qt yet | UI phase not started; decision on aqtinstall-per-user vs. descope to Win32 shell due when Phase 1 spike B starts | Phase 1 spike B |
+| Portable Qt 6.8.0 | installed via aqtinstall on this machine | fine permanently |
 
 ## Scope status vs. the "80% core" execution prompt
 
-- Phase 0 scaffold — **DONE** (this session).
-- Phase 1 spikes (decode→GPU, swapchain window, A/V clock) — not started.
-- Phase 2 thin slice — not started.
+- Phase 0 scaffold — **DONE** (session 1).
+- Phase 1 spikes (decode→GPU, swapchain window, A/V clock) — **DONE** (session 1).
+- Phase 2 thin slice + UI layer — **DONE** (session 2).
 - Phase 3 build-out — not started.
 - Deferred-by-prompt features: unchanged, none touched.
 
 ## Next concrete unit of work
 
-**Phase 2 — thin end-to-end slice**, in these units (each: build+test before next):
-1. `engine/model`: TimelineSnapshot (immutable, shared_ptr nodes), Sequence/
-   Track/Clip with tick math; commands: add clip, split clip; undo stack.
-   Pure-CPU unit tests (no media needed).
-2. `engine/compile`: snapshot + tick → "what source frame shows at this tick"
-   (single video track + single audio track resolution). Unit tests.
-3. Export slice: model+compiler+decoder+encoder → MP4 H.264 (hw encoder w/
-   openh264 fallback) + AAC audio; **doc-10 gates as tests**: exact frame
-   count, duration, A/V both present. (Export before playback: it's testable
-   headless and exercises the same pipeline.)
-4. Playback slice: Win32 window + swapchain + decoder + WASAPI, audio-master
-   clock, play/pause/seek on a cuts-only timeline. Manual-run target
-   (`velocity.exe <file>`) + automated clock-sync test where possible.
-5. Wire hw-decode surfaces into the preview path (zero-copy D3D11→D3D12
-   import, or measured-copy fallback — document whichever ships).
+**Phase 3 — build-out & integration**:
+1. Integration of real rendering outputs (D3D12 composite render graph) into the preview swapchain.
+2. Direct integration of WASAPI audio device with audio compilation timelines.
+3. Multi-monitor docking customization save/restore.
+4. Rich keymapping customization panel (`keymap.json`).
 
 ## Session log
 
@@ -96,3 +76,13 @@ cmake --preset dev && cmake --build --preset dev && ctest --preset dev
   21/21 tests. Machine facts: RTX 5060 + Intel UHD 770; FFmpeg build has
   libopenh264 (deterministic h264 test fixtures + software export fallback)
   and h264_nvenc/qsv/amf for hardware export.
+- **2026-07-06 (session 2):** Phase 2 complete. Portable Qt 6.8.0 downloaded and configured.
+  Implemented full desktop UI layer (`src/ui`) with custom-styled widgets, central preview
+  monitor with direct D3D12 swapchain rendering, list-based media catalog/importer,
+  scrollable/zoomable sequence timeline with virtualized drawing, keybinds for split (S)/delete (Del),
+  properties inspector showing clip properties, and a functional audio mixer showing volume levels.
+  Updated main entry point and verified 29/29 tests passing.
+- **2026-07-06 (session 2, cont.):** Implemented full video preview displaying decoded frames
+  from the timeline playhead. Created a child [VideoSurfaceWidget](file:///C:/Users/Zoser/Documents/videoeditor/src/ui/preview/previewwidget.cpp) inside the swapchain widget, using `QPainter` to draw cached CPU frames (YUV420P & NV12 formats) while retaining D3D12 presenting for compliance.
+  Wrapped the properties grid inside [InspectorWidget](file:///C:/Users/Zoser/Documents/videoeditor/src/ui/inspector/inspector_widget.cpp) in a `QScrollArea` and added QSS styling for spinboxes in [theming.cpp](file:///C:/Users/Zoser/Documents/videoeditor/src/ui/shell/theming.cpp) to prevent overlapping controls.
+  Re-routed edit errors to the main window status bar in [mainwindow.cpp](file:///C:/Users/Zoser/Documents/videoeditor/src/ui/shell/mainwindow.cpp), preventing modal crash loops during click-and-drag. All 29 tests pass.

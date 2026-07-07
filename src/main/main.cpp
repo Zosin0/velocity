@@ -1,10 +1,12 @@
-// Velocity entry point. Phase 0: initialize logging, verify the FFmpeg
-// runtime, exit cleanly. The window/engine bring-up replaces this in Phase 1.
-
 #include <velocity/foundation/log.h>
 #include <velocity/media/ffmpeg_info.h>
 
-int main() {
+#include <ui/shell/mainwindow.h>
+#include <ui/shell/theming.h>
+#include <QApplication>
+#include <spdlog/spdlog.h>
+
+int main(int argc, char* argv[]) {
     velocity::log::init("velocity");
     spdlog::info("Velocity 0.1.0 starting");
 
@@ -18,6 +20,14 @@ int main() {
         return 1;
     }
 
-    spdlog::info("clean exit");
-    return 0;
+    QApplication app(argc, argv);
+    velocity::ui::theming::applyDarkTheme(app);
+
+    velocity::ui::MainWindow win;
+    win.show();
+
+    spdlog::info("Entering GUI event loop");
+    int code = app.exec();
+    spdlog::info("Clean exit with code {}", code);
+    return code;
 }

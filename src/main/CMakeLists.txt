@@ -5,5 +5,7 @@ target_link_libraries(velocity PRIVATE
     velocity_options
     velocity::foundation
     velocity::media
+    velocity_ui
 )
 velocity_copy_ffmpeg_dlls(velocity)
+velocity_copy_qt_dlls(velocity)

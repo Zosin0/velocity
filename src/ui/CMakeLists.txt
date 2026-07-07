@@ -1,0 +1,32 @@
+# CMake file for the Qt UI library
+add_library(velocity_ui STATIC
+    shell/mainwindow.h
+    shell/mainwindow.cpp
+    shell/theming.h
+    shell/theming.cpp
+    shell/documentsession.h
+    shell/documentsession.cpp
+    preview/previewwidget.h
+    preview/previewwidget.cpp
+    timeline/timeline_widget.h
+    timeline/timeline_widget.cpp
+    inspector/inspector_widget.h
+    inspector/inspector_widget.cpp
+    bin/media_bin_widget.h
+    bin/media_bin_widget.cpp
+    mixer/mixer_widget.h
+    mixer/mixer_widget.cpp
+)
+
+target_include_directories(velocity_ui PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_link_libraries(velocity_ui PUBLIC
+    velocity_options
+    velocity::foundation
+    velocity::gpu
+    velocity::engine
+    velocity::media
+    Qt6::Widgets
+)
