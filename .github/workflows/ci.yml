@@ -23,18 +23,39 @@ jobs:
       - name: Install Qt6
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.6.2' 
+          version: '6.6.2'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2019_64'
+          setup-python: false
+        
+      - name: Debug Qt Installation
+        shell: powershell
+        run: |
+          Write-Host "PATH=$env:PATH"
+      
+          Get-ChildItem C:\ -Directory -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -eq "Qt6" } |
+            Select-Object FullName
+      
+          Get-ChildItem C:\ -Filter Qt6Config.cmake -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 20 FullName
 
       - name: Configure
         shell: powershell
         run: |
           . tools/devshell.ps1
-          cmake --preset release
+      
+          $qtPath = Get-ChildItem "$env:RUNNER_WORKSPACE" -Directory -Recurse |
+            Where-Object { $_.FullName -match "6\.6\.2.*msvc" } |
+            Select-Object -First 1 -ExpandProperty FullName
+      
+          cmake `
+            -DCMAKE_PREFIX_PATH="$qtPath" `
+            --preset release
+      
           if ($LASTEXITCODE -ne 0) { exit 1 }
-
+      
       - name: Build
         shell: powershell
         run: |
@@ -61,7 +82,7 @@ jobs:
         with:
           name: velocity-exe
           path: build/release/bin/velocity.exe
-          retention-days: 1
+          retention-days: 2
 
   release-publish:
     needs: build-test
