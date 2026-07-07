@@ -1,0 +1,155 @@
+/* Paleta de Cores */
+:root {
+    --black-piano: #050505;
+    --off-white: #f4f4f5;
+    --gray: #888888;
+    --dark-gray: #333333;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+body {
+    background-color: var(--black-piano);
+    color: var(--off-white);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+/* Navbar */
+.navbar {
+    padding: 2rem 4vw;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.logo {
+    font-size: 1.5rem;
+    font-weight: 900;
+    letter-spacing: -1.5px;
+    color: var(--off-white);
+}
+
+/* Hero Section */
+.hero {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    position: relative;
+    padding: 0 2rem;
+    margin-top: -15vh;
+}
+
+.content h1 {
+    font-size: clamp(3rem, 6vw, 5.5rem);
+    font-weight: 700;
+    line-height: 1.05;
+    margin-bottom: 1.5rem;
+    letter-spacing: -2px;
+    background: linear-gradient(180deg, #ffffff 0%, #777777 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.content p {
+    font-size: clamp(1rem, 2vw, 1.25rem);
+    color: var(--gray);
+    margin-bottom: 3rem;
+    font-weight: 400;
+    letter-spacing: -0.5px;
+}
+
+/* Botão de Download */
+.cta-button {
+    display: inline-block;
+    background-color: var(--off-white);
+    color: var(--black-piano);
+    text-decoration: none;
+    padding: 1.2rem 3rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    border-radius: 50px;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+    cursor: pointer;
+    position: relative;
+    z-index: 10;
+}
+
+.cta-button:hover {
+    transform: translateY(-3px) scale(1.02);
+    box-shadow: 0 10px 30px rgba(244, 244, 245, 0.15);
+}
+
+/* --- ANIMAÇÃO DO BONECO DE VELOCIDADE (EM EVIDÊNCIA) --- */
+.runner-container {
+    position: absolute;
+    bottom: 12%;
+    width: 100vw;
+    height: 120px; /* Aumentado para dar espaço ao boneco maior */
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.runner {
+    width: 100px; /* Boneco muito mais visível */
+    height: 100px;
+    margin-top: 25px;
+    color: var(--off-white);
+    position: absolute;
+    left: -120px;
+    animation: runAcross 2.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Piscar das linhas de vento atrás dele */
+.speed-line {
+    animation: wind 0.3s infinite alternate;
+}
+.sl-2 { animation-delay: 0.04s; }
+.sl-3 { animation-delay: 0.07s; }
+
+@keyframes runAcross {
+    0% {
+        transform: translateX(0) skewX(-15deg); 
+    }
+    100% {
+        transform: translateX(120vw) skewX(-25deg); /* Aumenta a inclinação no final para dar ideia de aceleração */
+    }
+}
+
+@keyframes wind {
+    0% { stroke-dasharray: 2 6; stroke-opacity: 0.1; transform: translateX(0); }
+    100% { stroke-dasharray: 10 2; stroke-opacity: 1; transform: translateX(-10px); }
+}
+
+/* --- DEV NOTE --- */
+.dev-note {
+    position: absolute;
+    bottom: 1.5rem;
+    right: 2rem;
+    font-size: 0.85rem;
+    color: var(--dark-gray);
+    letter-spacing: -0.3px;
+    transition: color 0.3s ease;
+}
+
+.dev-note a {
+    color: var(--gray);
+    text-decoration: none;
+    font-weight: 600;
+    transition: color 0.3s ease;
+}
+
+.dev-note:hover, .dev-note a:hover {
+    color: var(--off-white);
+}

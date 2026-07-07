@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Velocity | Clean Video Editing</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="logo">VELOCITY.</div>
+    </nav>
+
+    <main class="hero">
+        <div class="content">
+            <h1>A edição de vídeo<br>encontrou a velocidade.</h1>
+            <p>Clean. Direto ao ponto. Focado no essencial.</p>
+            
+            <!-- Link dinâmico apontando para a latest release do seu repositório -->
+            <a href="https://github.com/Zosin0/velocity/releases/latest/download/velocity.exe" class="cta-button" id="download-btn">
+                Baixar para Windows (.exe)
+            </a>
+        </div>
+
+        <!-- Chão e Animação do bonequinho correndo -->
+        <div class="runner-container">
+            <svg class="runner" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <!-- Cabeça inclinada pra frente -->
+                <circle cx="20" cy="6" r="3"></circle>
+                <!-- Corpo curvado e dinâmico -->
+                <path d="M19 9 Q 16 15 15 20"></path>
+                <!-- Braço arremessado pra frente -->
+                <path d="M18 11 Q 23 12 26 9"></path>
+                <!-- Braço puxado com força pra trás -->
+                <path d="M18 11 Q 13 13 8 10"></path>
+                <!-- Perna esticada buscando o chão -->
+                <path d="M15 20 Q 20 20 24 26"></path>
+                <!-- Perna de trás no ar (efeito cartoon) -->
+                <path d="M15 20 Q 12 25 6 22"></path>
+                
+                <!-- Linhas de velocidade fluidas -->
+                <path class="speed-line sl-1" d="M2 14 C 5 14, 8 14, 11 14"></path>
+                <path class="speed-line sl-2" d="M4 22 C 7 22, 10 22, 13 22"></path>
+                <path class="speed-line sl-3" d="M1 9 C 4 9, 7 9, 9 9"></path>
+            </svg>
+        </div>
+    </main>
+
+    <!-- Sua assinatura -->
+    <div class="dev-note">
+        vibecoded by <a href="https://github.com/Zosin0" target="_blank">Zosin0</a>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
