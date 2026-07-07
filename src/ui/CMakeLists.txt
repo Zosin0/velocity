@@ -18,6 +18,8 @@ add_library(velocity_ui STATIC
     mixer/mixer_widget.cpp
     exportdlg/export_dialog.h
     exportdlg/export_dialog.cpp
+    playback/playback_controller.h
+    playback/playback_controller.cpp
 )
 
 target_include_directories(velocity_ui PUBLIC
@@ -30,5 +32,6 @@ target_link_libraries(velocity_ui PUBLIC
     velocity::gpu
     velocity::engine
     velocity::media
+    velocity::audio
     Qt6::Widgets
 )

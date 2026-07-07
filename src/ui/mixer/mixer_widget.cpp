@@ -1,13 +1,16 @@
 #include "mixer_widget.h"
+#include "../playback/playback_controller.h"
 #include "../shell/documentsession.h"
 
 #include <QHBoxLayout>
-#include <QVBoxLayout>
-#include <QSlider>
-#include <QProgressBar>
 #include <QLabel>
+#include <QProgressBar>
+#include <QSlider>
 #include <QTimer>
-#include <cstdlib> // rand
+#include <QVBoxLayout>
+
+#include <algorithm>
+#include <cmath>
 
 namespace velocity::ui {
 
@@ -28,7 +31,7 @@ MixerWidget::MixerWidget(DocumentSession* session, QWidget* parent)
     titleLabel->setStyleSheet("font-weight: bold; color: #888888;");
     channelLayout->addWidget(titleLabel);
 
-    // VU Meters
+    // VU Meters (peak, fed by PlaybackController::audioLevels)
     auto* meterLayout = new QHBoxLayout();
     leftMeter_ = new QProgressBar(this);
     leftMeter_->setOrientation(Qt::Vertical);
@@ -53,16 +56,17 @@ MixerWidget::MixerWidget(DocumentSession* session, QWidget* parent)
     rightMeter_->setValue(0);
     rightMeter_->setTextVisible(false);
     rightMeter_->setFixedWidth(10);
-    rightMeter_->setStyleSheet(leftMeter_->styleSheet()); // share stylesheet
+    rightMeter_->setStyleSheet(leftMeter_->styleSheet());
 
     meterLayout->addWidget(leftMeter_);
     meterLayout->addWidget(rightMeter_);
 
-    // Slider
+    // Master fader: 0..125 maps to -inf..+6 dB-ish; 100 = unity gain.
     masterSlider_ = new QSlider(Qt::Vertical, this);
-    masterSlider_->setRange(0, 100);
-    masterSlider_->setValue(80);
+    masterSlider_->setRange(0, 125);
+    masterSlider_->setValue(100);
     masterSlider_->setFixedHeight(120);
+    masterSlider_->setToolTip("Master volume");
     meterLayout->addWidget(masterSlider_);
 
     channelLayout->addLayout(meterLayout);
@@ -75,42 +79,51 @@ MixerWidget::MixerWidget(DocumentSession* session, QWidget* parent)
     layout->addLayout(channelLayout);
     layout->addStretch();
 
-    // Volume level label update
     connect(masterSlider_, &QSlider::valueChanged, this, [this](int val) {
-        double db = (val - 80) * 0.25; // 80 is 0.0 dB
-        if (val == 0) {
-            dbLabel_->setText("-inf dB");
+        // Fader taper: linear-in-dB above -60 dB.
+        float gain = 0.0f;
+        if (val > 0) {
+            const double db = (val - 100) * 0.6; // 100 → 0 dB, 0 → -60 dB, 125 → +15... clamp
+            const double clamped = std::min(db, 6.0);
+            gain = static_cast<float>(std::pow(10.0, clamped / 20.0));
+            dbLabel_->setText(QString::asprintf("%+.1f dB", clamped));
         } else {
-            dbLabel_->setText(QString::asprintf("%+.1f dB", db));
+            dbLabel_->setText("-inf dB");
         }
+        if (playback_)
+            playback_->setMasterGain(gain);
     });
 
-    // Animate meters to simulate playback activity
-    meterTimer_ = new QTimer(this);
-    connect(meterTimer_, &QTimer::timeout, this, &MixerWidget::updateMeters);
-    meterTimer_->start(50); // 20 FPS updates
+    // Peak-hold decay so meters fall smoothly between level updates.
+    decayTimer_ = new QTimer(this);
+    decayTimer_->setInterval(50);
+    connect(decayTimer_, &QTimer::timeout, this, [this]() {
+        leftMeter_->setValue(std::max(0, leftMeter_->value() - 6));
+        rightMeter_->setValue(std::max(0, rightMeter_->value() - 6));
+        if (leftMeter_->value() == 0 && rightMeter_->value() == 0)
+            decayTimer_->stop();
+    });
 }
 
-void MixerWidget::updateMeters() {
-    static int prevPlayhead = 0;
-    int curPlayhead = static_cast<int>(session_->playhead());
+void MixerWidget::attachPlayback(PlaybackController* playback) {
+    playback_ = playback;
+    connect(playback_, &PlaybackController::audioLevels, this, &MixerWidget::onAudioLevels);
+    // Push the initial fader position into the controller.
+    emit masterSlider_->valueChanged(masterSlider_->value());
+}
 
-    // If playhead changed, we assume active playback or scrubbing
-    bool isMoving = curPlayhead != prevPlayhead;
-    prevPlayhead = curPlayhead;
-
-    if (isMoving && masterSlider_->value() > 0) {
-        // Generate random sound level peaks relative to slider volume
-        int maxVal = masterSlider_->value();
-        int l = std::max(0, maxVal - (std::rand() % 30));
-        int r = std::max(0, maxVal - (std::rand() % 30));
-        leftMeter_->setValue(l);
-        rightMeter_->setValue(r);
-    } else {
-        // Fast decay to zero
-        leftMeter_->setValue(std::max(0, leftMeter_->value() - 15));
-        rightMeter_->setValue(std::max(0, rightMeter_->value() - 15));
-    }
+void MixerWidget::onAudioLevels(float left, float right) {
+    // Peak meter with a gentle log curve so speech is visible.
+    auto toMeter = [](float peak) {
+        if (peak <= 0.0001f)
+            return 0;
+        const float db = 20.0f * std::log10(peak); // 0 dBFS → 0
+        return static_cast<int>(std::clamp((db + 60.0f) / 60.0f, 0.0f, 1.0f) * 100.0f);
+    };
+    leftMeter_->setValue(std::max(leftMeter_->value(), toMeter(left)));
+    rightMeter_->setValue(std::max(rightMeter_->value(), toMeter(right)));
+    if (!decayTimer_->isActive())
+        decayTimer_->start();
 }
 
 } // namespace velocity::ui

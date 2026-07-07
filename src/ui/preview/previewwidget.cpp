@@ -3,7 +3,7 @@
 
 #include <velocity/foundation/log.h>
 #include <velocity/engine/compile.h>
-#include <velocity/media/video_decoder.h>
+#include <velocity/media/sequential_reader.h>
 #include <spdlog/spdlog.h>
 #include <QResizeEvent>
 #include <QPainter>
@@ -207,22 +207,23 @@ void PreviewWidget::renderFrame() {
     if (sampleOpt) {
         const auto& sample = sampleOpt.value();
         // Check if we need to open a new decoder or switch assets
-        if (currentAssetPath_ != sample.asset || !decoder_) {
+        if (currentAssetPath_ != sample.asset || !reader_) {
             media::DecodeOptions opts;
             opts.preferHardware = true; // Use D3D11VA hardware decode if available
             auto decRes = media::VideoDecoder::open(sample.asset, opts);
             if (decRes) {
-                decoder_ = std::move(decRes.value());
+                reader_ = std::make_unique<media::SequentialFrameReader>(std::move(decRes.value()));
                 currentAssetPath_ = sample.asset;
             } else {
-                decoder_.reset();
+                reader_.reset();
                 currentAssetPath_.clear();
             }
         }
 
-        if (decoder_) {
-            // Seek and read frame at target PTS
-            auto frameRes = decoder_->readFrameAt(sample.srcPts);
+        if (reader_) {
+            // Sequential-locality read: rolls forward during playback,
+            // seeks only on jumps (docs/04 §2).
+            auto frameRes = reader_->at(sample.srcPts);
             if (frameRes) {
                 QImage img = convertVideoFrameToQImage(frameRes.value());
                 if (videoSurface_) {

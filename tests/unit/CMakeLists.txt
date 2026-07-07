@@ -42,6 +42,7 @@ add_executable(velocity_unit_tests
     audio_tests.cpp
     model_tests.cpp
     export_tests.cpp
+    audio_mix_tests.cpp
 )
 target_link_libraries(velocity_unit_tests PRIVATE
     velocity_options

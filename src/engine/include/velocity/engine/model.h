@@ -24,6 +24,22 @@ ClipId nextClipId(); // process-wide monotonic
 
 enum class TrackKind { video, audio };
 
+// Static (non-animated) per-clip video transform. Normalized center offsets:
+// (0,0) = frame center; ±0.5 = half the sequence dimension. Keyframing is a
+// later phase; the fields are value types so that upgrade is additive.
+struct ClipTransform {
+    float posX = 0.0f;
+    float posY = 0.0f;
+    float scale = 1.0f;
+    float rotation = 0.0f; // degrees
+    float opacity = 1.0f;
+
+    [[nodiscard]] bool isIdentity() const {
+        return posX == 0.0f && posY == 0.0f && scale == 1.0f && rotation == 0.0f &&
+               opacity == 1.0f;
+    }
+};
+
 struct Clip {
     ClipId id = 0;
     std::filesystem::path asset; // Phase 2: the file path is the asset identity
@@ -33,6 +49,16 @@ struct Clip {
 
     std::int64_t srcStartPts = 0; // in-point in the source stream's timebase
     Rational srcTimebase{1, kTickRate};
+
+    // Audio properties (audio clips and video-with-audio).
+    float gain = 1.0f; // linear
+    bool mute = false;
+    Tick fadeIn = 0;  // duration from clip head
+    Tick fadeOut = 0; // duration to clip tail
+
+    // Video properties (video/image/title clips).
+    ClipTransform transform;
+    bool hidden = false;
 
     [[nodiscard]] Tick dstEnd() const { return dstStart + dstLen; }
     [[nodiscard]] bool contains(Tick t) const { return t >= dstStart && t < dstEnd(); }

@@ -142,6 +142,48 @@ EditResult trimClipHead(const SnapshotPtr& seq, size_t trackIdx, ClipId id, Tick
     });
 }
 
+EditResult updateClip(const SnapshotPtr& seq, size_t trackIdx, ClipId id,
+                      const std::function<void(Clip&)>& mutate) {
+    return withTrack(seq, trackIdx, [&](std::vector<ClipPtr>& clips) -> std::string {
+        auto it = findClip(clips, id);
+        if (it == clips.end())
+            return "clip not found";
+        Clip changed = **it;
+        mutate(changed);
+        changed.id = id; // identity is immutable
+        *it = std::make_shared<const Clip>(std::move(changed));
+        return {};
+    });
+}
+
+EditResult moveClipToTrack(const SnapshotPtr& seq, size_t fromTrack, ClipId id, size_t toTrack,
+                           Tick newStart) {
+    if (fromTrack == toTrack)
+        return moveClip(seq, fromTrack, id, newStart);
+    if (fromTrack >= seq->tracks.size() || toTrack >= seq->tracks.size())
+        return makeUnexpected(std::string("track index out of range"));
+    if (seq->tracks[fromTrack]->kind != seq->tracks[toTrack]->kind)
+        return makeUnexpected(std::string("cannot move clip between video and audio tracks"));
+    if (newStart < 0)
+        return makeUnexpected(std::string("clip cannot start before 0"));
+
+    // Find and detach the clip from the source track.
+    ClipPtr moved;
+    for (const auto& c : seq->tracks[fromTrack]->clips)
+        if (c->id == id)
+            moved = c;
+    if (!moved)
+        return makeUnexpected(std::string("clip not found"));
+
+    auto removed = removeClip(seq, fromTrack, id);
+    if (!removed)
+        return removed;
+
+    Clip placed = *moved;
+    placed.dstStart = newStart;
+    return addClip(*removed, toTrack, std::move(placed));
+}
+
 EditResult trimClipTail(const SnapshotPtr& seq, size_t trackIdx, ClipId id, Tick newEnd) {
     return withTrack(seq, trackIdx, [&](std::vector<ClipPtr>& clips) -> std::string {
         auto it = findClip(clips, id);

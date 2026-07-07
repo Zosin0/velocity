@@ -14,6 +14,7 @@ class PreviewWidget;
 class TimelineWidget;
 class InspectorWidget;
 class MixerWidget;
+class PlaybackController;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -27,7 +28,6 @@ private slots:
     void onOpenProject();
     void onSaveProject();
     void onExportVideo();
-    void onPlayPauseToggled();
     void onStepForward();
     void onStepBackward();
     void onShowError(const QString& msg);
@@ -41,6 +41,7 @@ private:
 
     // Session State
     DocumentSession* session_;
+    PlaybackController* playback_;
 
     // Widgets
     MediaBinWidget* mediaBin_;
@@ -51,8 +52,7 @@ private:
 
     // Actions
     QAction* playPauseAction_;
-    QTimer* playbackTimer_;
-    bool isPlaying_ = false;
+    QAction* loopAction_;
 };
 
 } // namespace velocity::ui

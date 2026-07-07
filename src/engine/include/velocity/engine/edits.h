@@ -6,6 +6,7 @@
 #include <velocity/engine/model.h>
 #include <velocity/foundation/expected.h>
 
+#include <functional>
 #include <string>
 
 namespace velocity::engine {
@@ -36,6 +37,16 @@ EditResult moveClip(const SnapshotPtr& seq, size_t trackIdx, ClipId id, Tick new
 // the content under the playhead stays fixed (standard NLE trim semantics).
 EditResult trimClipHead(const SnapshotPtr& seq, size_t trackIdx, ClipId id, Tick newStart);
 EditResult trimClipTail(const SnapshotPtr& seq, size_t trackIdx, ClipId id, Tick newEnd);
+
+// Generic property edit: copies the clip, lets `mutate` adjust it, then
+// revalidates track invariants. Placement fields may be changed too; overlap
+// rules still apply. Used by the inspector for gain/fades/transform edits.
+EditResult updateClip(const SnapshotPtr& seq, size_t trackIdx, ClipId id,
+                      const std::function<void(Clip&)>& mutate);
+
+// Moves a clip to a different track (same kind only); fails on overlap.
+EditResult moveClipToTrack(const SnapshotPtr& seq, size_t fromTrack, ClipId id, size_t toTrack,
+                           Tick newStart);
 
 // Bounded linear undo/redo over snapshots. Structural sharing keeps retained
 // snapshots cheap; the memory-budget valve (docs/02 §5) is future work.

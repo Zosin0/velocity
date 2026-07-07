@@ -49,40 +49,71 @@ void DocumentSession::importMedia(const std::filesystem::path& path, size_t trac
         duration = ticksFromSeconds(5.0); // default to 5 seconds if duration unknown
     }
 
-    // Determine target track index
-    size_t targetTrack = trackIdx;
-    if (targetTrack >= currentSnapshot()->tracks.size()) {
-        targetTrack = 0;
+    auto seq = currentSnapshot();
+
+    // Track helpers: first track of a kind, preferring the requested index.
+    auto findTrack = [&](engine::TrackKind kind, size_t preferred) -> std::optional<size_t> {
+        if (preferred < seq->tracks.size() && seq->tracks[preferred]->kind == kind)
+            return preferred;
+        for (size_t i = 0; i < seq->tracks.size(); ++i)
+            if (seq->tracks[i]->kind == kind)
+                return i;
+        return std::nullopt;
+    };
+
+    // Landing position: end of existing content on the chosen track.
+    auto nextFreeStart = [&](size_t track) -> Tick {
+        const auto& clips = seq->tracks[track]->clips;
+        return clips.empty() ? 0 : clips.back()->dstEnd();
+    };
+
+    const bool hasVideo = info.bestVideo.has_value();
+    const bool hasAudio = info.bestAudio.has_value();
+
+    // 2. Place video (and its linked audio) or audio-only, as ONE undo step.
+    engine::EditResult result = makeUnexpected(std::string("no usable stream"));
+    if (hasVideo) {
+        const auto videoTrack = findTrack(engine::TrackKind::video, trackIdx);
+        if (!videoTrack) {
+            emit errorOccurred("No video track available");
+            return;
+        }
+        const Tick startPos = nextFreeStart(*videoTrack);
+
+        engine::Clip v;
+        v.asset = path;
+        v.dstStart = startPos;
+        v.dstLen = duration;
+        v.srcTimebase = info.bestVideo->timebase;
+        result = engine::addClip(seq, *videoTrack, std::move(v));
+
+        if (result && hasAudio) {
+            if (const auto audioTrack = findTrack(engine::TrackKind::audio, trackIdx)) {
+                engine::Clip a;
+                a.asset = path;
+                a.dstStart = startPos;
+                a.dstLen = duration;
+                a.srcTimebase = info.bestAudio->timebase;
+                if (auto withAudio = engine::addClip(*result, *audioTrack, std::move(a)))
+                    result = std::move(withAudio);
+                // If the audio lane is occupied the video-only placement stands.
+            }
+        }
+    } else if (hasAudio) {
+        const auto audioTrack = findTrack(engine::TrackKind::audio, trackIdx);
+        if (!audioTrack) {
+            emit errorOccurred("No audio track available");
+            return;
+        }
+        engine::Clip a;
+        a.asset = path;
+        a.dstStart = nextFreeStart(*audioTrack);
+        a.dstLen = duration;
+        a.srcTimebase = info.bestAudio->timebase;
+        result = engine::addClip(seq, *audioTrack, std::move(a));
     }
 
-    // 2. Create the Clip struct
-    engine::Clip newClip;
-    newClip.id = engine::nextClipId();
-    newClip.asset = path;
-    
-    // Find next empty spot on target track
-    Tick startPos = 0;
-    const auto& track = currentSnapshot()->tracks[targetTrack];
-    if (!track->clips.empty()) {
-        startPos = track->clips.back()->dstEnd() + ticksFromSeconds(0.5); // 0.5s gap
-    }
-    newClip.dstStart = startPos;
-    newClip.dstLen = duration;
-    
-    if (info.bestVideo) {
-        newClip.srcTimebase = info.bestVideo->timebase;
-        newClip.srcStartPts = 0;
-    } else if (info.bestAudio) {
-        newClip.srcTimebase = info.bestAudio->timebase;
-        newClip.srcStartPts = 0;
-    } else {
-        newClip.srcTimebase = Rational{1, kTickRate};
-        newClip.srcStartPts = 0;
-    }
-
-    // 3. Add to track
-    auto res = engine::addClip(currentSnapshot(), targetTrack, std::move(newClip));
-    updateSnapshot(std::move(res));
+    updateSnapshot(std::move(result));
 }
 
 void DocumentSession::splitClipAtPlayhead() {

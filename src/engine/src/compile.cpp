@@ -40,6 +40,8 @@ std::vector<AudioSegment> audioSegmentsInRange(const Sequence& seq, Tick start, 
         if (track->kind != TrackKind::audio)
             continue;
         for (const auto& c : track->clips) {
+            if (c->mute)
+                continue;
             const Tick s = std::max(start, c->dstStart);
             const Tick e = std::min(end, c->dstEnd());
             if (s >= e)
@@ -51,6 +53,11 @@ std::vector<AudioSegment> audioSegmentsInRange(const Sequence& seq, Tick start, 
             seg.start = s;
             seg.len = e - s;
             seg.clip = c->id;
+            seg.gain = c->gain;
+            seg.clipStart = c->dstStart;
+            seg.clipEnd = c->dstEnd();
+            seg.fadeIn = c->fadeIn;
+            seg.fadeOut = c->fadeOut;
             out.push_back(std::move(seg));
         }
     }

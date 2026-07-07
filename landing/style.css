@@ -1,8 +1,9 @@
 /* Paleta de Cores */
 :root {
-    --black-piano: #050505; /* Preto super escuro */
-    --off-white: #f4f4f5;   /* Branco suave */
+    --black-piano: #050505;
+    --off-white: #f4f4f5;
     --gray: #888888;
+    --dark-gray: #333333;
 }
 
 * {
@@ -15,7 +16,7 @@
 body {
     background-color: var(--black-piano);
     color: var(--off-white);
-    overflow: hidden; /* Evita scroll horizontal com a animação */
+    overflow: hidden;
     display: flex;
     flex-direction: column;
     min-height: 100vh;
@@ -46,7 +47,7 @@ body {
     text-align: center;
     position: relative;
     padding: 0 2rem;
-    margin-top: -10vh; /* Ajuste para centralizar visualmente */
+    margin-top: -15vh;
 }
 
 .content h1 {
@@ -55,7 +56,6 @@ body {
     line-height: 1.05;
     margin-bottom: 1.5rem;
     letter-spacing: -2px;
-    /* Efeito de brilho moderno no texto */
     background: linear-gradient(180deg, #ffffff 0%, #777777 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -81,6 +81,8 @@ body {
     border-radius: 50px;
     transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
     cursor: pointer;
+    position: relative;
+    z-index: 10;
 }
 
 .cta-button:hover {
@@ -88,44 +90,66 @@ body {
     box-shadow: 0 10px 30px rgba(244, 244, 245, 0.15);
 }
 
-/* --- ANIMAÇÃO DO BONECO DE VELOCIDADE --- */
+/* --- ANIMAÇÃO DO BONECO DE VELOCIDADE (EM EVIDÊNCIA) --- */
 .runner-container {
     position: absolute;
-    bottom: 5%;
+    bottom: 12%;
     width: 100vw;
-    height: 80px;
+    height: 120px; /* Aumentado para dar espaço ao boneco maior */
     display: flex;
     align-items: center;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05); /* Uma linha sutil imitando o chão */
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .runner {
-    width: 64px;
-    height: 64px;
+    width: 100px; /* Boneco muito mais visível */
+    height: 100px;
+    margin-top: 25px;
     color: var(--off-white);
     position: absolute;
-    left: -100px; /* Começa fora da tela pela esquerda */
-    /* Animação que dura 3s e repete infinitamente */
-    animation: runAcross 3s cubic-bezier(0.5, 0, 0.1, 1) infinite;
+    left: -120px;
+    animation: runAcross 2.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
 /* Piscar das linhas de vento atrás dele */
 .speed-line {
-    animation: wind 0.15s infinite alternate;
+    animation: wind 0.3s infinite alternate;
 }
-.sl-2 { animation-delay: 0.05s; }
-.sl-3 { animation-delay: 0.1s; }
+.sl-2 { animation-delay: 0.04s; }
+.sl-3 { animation-delay: 0.07s; }
 
 @keyframes runAcross {
     0% {
-        transform: translateX(0) skewX(-20deg); /* Inclinado para frente por causa da velocidade */
+        transform: translateX(0) skewX(-15deg); 
     }
     100% {
-        transform: translateX(110vw) skewX(-20deg); /* Atravessa toda a tela */
+        transform: translateX(120vw) skewX(-25deg); /* Aumenta a inclinação no final para dar ideia de aceleração */
     }
 }
 
 @keyframes wind {
-    0% { stroke-dasharray: 2 4; stroke-opacity: 0.2; transform: translateX(0); }
-    100% { stroke-dasharray: 8 2; stroke-opacity: 1; transform: translateX(-5px); }
+    0% { stroke-dasharray: 2 6; stroke-opacity: 0.1; transform: translateX(0); }
+    100% { stroke-dasharray: 10 2; stroke-opacity: 1; transform: translateX(-10px); }
+}
+
+/* --- DEV NOTE --- */
+.dev-note {
+    position: absolute;
+    bottom: 1.5rem;
+    right: 2rem;
+    font-size: 0.85rem;
+    color: var(--dark-gray);
+    letter-spacing: -0.3px;
+    transition: color 0.3s ease;
+}
+
+.dev-note a {
+    color: var(--gray);
+    text-decoration: none;
+    font-weight: 600;
+    transition: color 0.3s ease;
+}
+
+.dev-note:hover, .dev-note a:hover {
+    color: var(--off-white);
 }

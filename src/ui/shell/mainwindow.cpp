@@ -7,6 +7,7 @@
 #include "../inspector/inspector_widget.h"
 #include "../mixer/mixer_widget.h"
 #include "../exportdlg/export_dialog.h"
+#include "../playback/playback_controller.h"
 #include "theming.h"
 
 #include <QDockWidget>
@@ -30,9 +31,10 @@ MainWindow::MainWindow(QWidget* parent)
     // Configure window basic properties
     resize(1280, 720);
     
-    // 1. Initialize Document Session
+    // 1. Initialize Document Session + real playback engine (audio-master clock)
     session_ = new DocumentSession(this);
     connect(session_, &DocumentSession::errorOccurred, this, &MainWindow::onShowError);
+    playback_ = new PlaybackController(session_, this);
 
     updateTitle();
 
@@ -44,24 +46,12 @@ MainWindow::MainWindow(QWidget* parent)
     setupToolbar();
     setupStatusBar();
 
-    // 4. Setup Playback Simulation Timer
-    playbackTimer_ = new QTimer(this);
-    playbackTimer_->setInterval(33); // ~30 fps
-    connect(playbackTimer_, &QTimer::timeout, this, [this]() {
-        Tick cur = session_->playhead();
-        Tick step = kTickRate / 30; // 30 fps frame step (1600 ticks)
-        Tick next = cur + step;
-        
-        Tick duration = session_->currentSnapshot()->duration();
-        if (duration > 0 && next >= duration) {
-            // Loop back to start
-            session_->setPlayhead(0);
-        } else {
-            session_->setPlayhead(next);
-        }
+    // 4. Wire playback state into the UI
+    mixer_->attachPlayback(playback_);
+    connect(playback_, &PlaybackController::playStateChanged, this, [this](bool playing) {
+        playPauseAction_->setText(playing ? "⏸ Pause" : "▶ Play");
     });
 
-    // Make sure we connect playhead and snapshot updates to update window title or status
     connect(session_, &DocumentSession::snapshotChanged, this, [this](const engine::SnapshotPtr&) {
         updateTitle();
     });
@@ -181,14 +171,35 @@ void MainWindow::setupDocks() {
     transportLayout->addWidget(prevFrameBtn);
 
     playPauseAction_ = new QAction("▶ Play", this);
+    playPauseAction_->setShortcut(QKeySequence(Qt::Key_Space));
+    addAction(playPauseAction_); // window-wide Space shortcut
     auto* playBtn = new QPushButton("▶ Play", centralWidget);
     playBtn->setFixedWidth(64);
     connect(playBtn, &QPushButton::clicked, playPauseAction_, &QAction::trigger);
     connect(playPauseAction_, &QAction::changed, this, [playBtn, this]() {
         playBtn->setText(playPauseAction_->text());
     });
-    connect(playPauseAction_, &QAction::triggered, this, &MainWindow::onPlayPauseToggled);
+    connect(playPauseAction_, &QAction::triggered, this,
+            [this]() { playback_->togglePlayPause(); });
     transportLayout->addWidget(playBtn);
+
+    auto* stopBtn = new QPushButton("⏹", centralWidget);
+    stopBtn->setToolTip("Stop (return to play start)");
+    stopBtn->setFixedWidth(32);
+    connect(stopBtn, &QPushButton::clicked, this, [this]() { playback_->stop(); });
+    transportLayout->addWidget(stopBtn);
+
+    loopAction_ = new QAction("Loop", this);
+    loopAction_->setCheckable(true);
+    auto* loopBtn = new QPushButton("🔁", centralWidget);
+    loopBtn->setToolTip("Loop playback");
+    loopBtn->setFixedWidth(32);
+    loopBtn->setCheckable(true);
+    connect(loopBtn, &QPushButton::toggled, this, [this](bool on) {
+        loopAction_->setChecked(on);
+        playback_->setLoop(on);
+    });
+    transportLayout->addWidget(loopBtn);
 
     auto* nextFrameBtn = new QPushButton("▶", centralWidget);
     nextFrameBtn->setToolTip("Next Frame");
@@ -267,16 +278,17 @@ void MainWindow::setupStatusBar() {
 void MainWindow::onNewProject() {
     auto confirm = QMessageBox::question(this, "New Project", "Create a new project? All unsaved work will be lost.", QMessageBox::Yes | QMessageBox::No);
     if (confirm == QMessageBox::Yes) {
-        // Re-instantiate session
-        if (playbackTimer_->isActive()) {
-            playbackTimer_->stop();
-            playPauseAction_->setText("▶ Play");
-            isPlaying_ = false;
-        }
-        
+        // Re-instantiate session and playback engine
+        playback_->pause();
+        delete playback_;
+
         session_->deleteLater();
         session_ = new DocumentSession(this);
         connect(session_, &DocumentSession::errorOccurred, this, &MainWindow::onShowError);
+        playback_ = new PlaybackController(session_, this);
+        connect(playback_, &PlaybackController::playStateChanged, this, [this](bool playing) {
+            playPauseAction_->setText(playing ? "⏸ Pause" : "▶ Play");
+        });
         
         // Re-inject session pointers
         mediaBin_->deleteLater();
@@ -301,6 +313,7 @@ void MainWindow::onNewProject() {
                 dock->setWidget(mixer_);
             }
         }
+        mixer_->attachPlayback(playback_);
         
         // Update connections
         connect(session_, &DocumentSession::playheadChanged, this, [this](Tick) {
@@ -342,24 +355,21 @@ void MainWindow::onExportVideo() {
     dialog.exec();
 }
 
-void MainWindow::onPlayPauseToggled() {
-    if (isPlaying_) {
-        playbackTimer_->stop();
-        playPauseAction_->setText("▶ Play");
-        isPlaying_ = false;
-    } else {
-        playbackTimer_->start();
-        playPauseAction_->setText("⏸ Pause");
-        isPlaying_ = true;
-    }
-}
-
 void MainWindow::onStepForward() {
-    session_->setPlayhead(session_->playhead() + kTickRate / 30); // advance 1 frame (30fps)
+    playback_->pause();
+    const Rational fps = session_->currentSnapshot()->frameRate;
+    const auto frame = frameIndexFromTicks(session_->playhead(), fps);
+    session_->setPlayhead(ticksFromFrameIndex(frame + 1, fps));
 }
 
 void MainWindow::onStepBackward() {
-    session_->setPlayhead(session_->playhead() - kTickRate / 30); // retreat 1 frame (30fps)
+    playback_->pause();
+    const Rational fps = session_->currentSnapshot()->frameRate;
+    const auto frame = frameIndexFromTicks(session_->playhead(), fps);
+    if (frame > 0)
+        session_->setPlayhead(ticksFromFrameIndex(frame - 1, fps));
+    else
+        session_->setPlayhead(0);
 }
 
 void MainWindow::onShowError(const QString& msg) {

@@ -27,6 +27,13 @@ struct AudioSegment {
     Tick start = 0; // timeline range covered (clipped to the query range)
     Tick len = 0;
     ClipId clip = 0;
+
+    // Envelope inputs (docs/07 §3): applied by the mixer, not the resolver.
+    float gain = 1.0f;
+    Tick clipStart = 0; // full clip bounds for fade math
+    Tick clipEnd = 0;
+    Tick fadeIn = 0;
+    Tick fadeOut = 0;
 };
 
 // All audio-clip pieces intersecting [start, start+len), across audio tracks,

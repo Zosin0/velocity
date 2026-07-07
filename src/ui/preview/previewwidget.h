@@ -9,7 +9,7 @@
 #include <QImage>
 
 namespace velocity::media {
-class VideoDecoder;
+class SequentialFrameReader;
 }
 
 namespace velocity::ui {
@@ -41,7 +41,7 @@ private:
     // Video preview components
     VideoSurfaceWidget* videoSurface_ = nullptr;
     std::filesystem::path currentAssetPath_;
-    std::unique_ptr<media::VideoDecoder> decoder_;
+    std::unique_ptr<media::SequentialFrameReader> reader_;
 };
 
 } // namespace velocity::ui
