@@ -1,4 +1,5 @@
 #include "previewwidget.h"
+#include "../services/frame_conversion.h"
 #include "../shell/documentsession.h"
 
 #include <velocity/foundation/log.h>
@@ -15,107 +16,6 @@
 
 namespace velocity::ui {
 
-// Utility to convert VideoFrame to QImage
-static QImage convertVideoFrameToQImage(const velocity::media::VideoFrame& frame) {
-    auto cpuFrameRes = frame.transferToCpu();
-    if (!cpuFrameRes) {
-        return QImage();
-    }
-    const auto& cpuFrame = cpuFrameRes.value();
-
-    int w = cpuFrame.width();
-    int h = cpuFrame.height();
-    int fmt = cpuFrame.pixelFormatInt();
-
-    QImage img(w, h, QImage::Format_RGB32);
-
-    if (fmt == 0) { // AV_PIX_FMT_YUV420P
-        const std::uint8_t* yData = cpuFrame.data(0);
-        const std::uint8_t* uData = cpuFrame.data(1);
-        const std::uint8_t* vData = cpuFrame.data(2);
-        int yStride = cpuFrame.stride(0);
-        int uStride = cpuFrame.stride(1);
-        int vStride = cpuFrame.stride(2);
-
-        for (int y = 0; y < h; ++y) {
-            QRgb* line = reinterpret_cast<QRgb*>(img.scanLine(y));
-            for (int x = 0; x < w; ++x) {
-                int yVal = yData[y * yStride + x];
-                int uVal = uData[(y / 2) * uStride + (x / 2)] - 128;
-                int vVal = vData[(y / 2) * vStride + (x / 2)] - 128;
-
-                int r = std::clamp(static_cast<int>(yVal + 1.402 * vVal), 0, 255);
-                int g = std::clamp(static_cast<int>(yVal - 0.344136 * uVal - 0.714136 * vVal), 0, 255);
-                int b = std::clamp(static_cast<int>(yVal + 1.772 * uVal), 0, 255);
-
-                line[x] = qRgb(r, g, b);
-            }
-        }
-    } else if (fmt == 23 || fmt == 24) { // AV_PIX_FMT_NV12 (23) or AV_PIX_FMT_NV21 (24)
-        const std::uint8_t* yData = cpuFrame.data(0);
-        const std::uint8_t* uvData = cpuFrame.data(1);
-        int yStride = cpuFrame.stride(0);
-        int uvStride = cpuFrame.stride(1);
-
-        bool isNV12 = (fmt == 23);
-
-        for (int y = 0; y < h; ++y) {
-            QRgb* line = reinterpret_cast<QRgb*>(img.scanLine(y));
-            for (int x = 0; x < w; ++x) {
-                int yVal = yData[y * yStride + x];
-                
-                int uvIdx = (y / 2) * uvStride + (x / 2) * 2;
-                int uVal = uvData[uvIdx + (isNV12 ? 0 : 1)] - 128;
-                int vVal = uvData[uvIdx + (isNV12 ? 1 : 0)] - 128;
-
-                int r = std::clamp(static_cast<int>(yVal + 1.402 * vVal), 0, 255);
-                int g = std::clamp(static_cast<int>(yVal - 0.344136 * uVal - 0.714136 * vVal), 0, 255);
-                int b = std::clamp(static_cast<int>(yVal + 1.772 * uVal), 0, 255);
-
-                line[x] = qRgb(r, g, b);
-            }
-        }
-    } else if (fmt == 26) { // AV_PIX_FMT_RGBA — image imports (PNG/WebP)
-        const std::uint8_t* src = cpuFrame.data(0);
-        const int stride = cpuFrame.stride(0);
-        QImage rgba(w, h, QImage::Format_RGBA8888);
-        for (int y = 0; y < h; ++y)
-            memcpy(rgba.scanLine(y), src + static_cast<size_t>(y) * stride,
-                   static_cast<size_t>(w) * 4);
-        return rgba;
-    } else if (fmt == 2) { // AV_PIX_FMT_RGB24 — JPEG and friends
-        const std::uint8_t* src = cpuFrame.data(0);
-        const int stride = cpuFrame.stride(0);
-        QImage rgb(w, h, QImage::Format_RGB888);
-        for (int y = 0; y < h; ++y)
-            memcpy(rgb.scanLine(y), src + static_cast<size_t>(y) * stride,
-                   static_cast<size_t>(w) * 3);
-        return rgb.convertToFormat(QImage::Format_RGB32);
-    } else if (fmt == 12) { // AV_PIX_FMT_YUVJ420P — full-range JPEG luma
-        // Same layout as yuv420p; the BT.601 math above is close enough for
-        // preview purposes (exact color management is the render-graph pass).
-        const std::uint8_t* yData = cpuFrame.data(0);
-        const std::uint8_t* uData = cpuFrame.data(1);
-        const std::uint8_t* vData = cpuFrame.data(2);
-        for (int y = 0; y < h; ++y) {
-            QRgb* line = reinterpret_cast<QRgb*>(img.scanLine(y));
-            for (int x = 0; x < w; ++x) {
-                int yVal = yData[y * cpuFrame.stride(0) + x];
-                int uVal = uData[(y / 2) * cpuFrame.stride(1) + (x / 2)] - 128;
-                int vVal = vData[(y / 2) * cpuFrame.stride(2) + (x / 2)] - 128;
-                int r = std::clamp(static_cast<int>(yVal + 1.402 * vVal), 0, 255);
-                int g = std::clamp(static_cast<int>(yVal - 0.344136 * uVal - 0.714136 * vVal), 0, 255);
-                int b = std::clamp(static_cast<int>(yVal + 1.772 * uVal), 0, 255);
-                line[x] = qRgb(r, g, b);
-            }
-        }
-    } else {
-        img.fill(Qt::black);
-    }
-
-    return img;
-}
-
 // Child widget compositing all visible video layers bottom-to-top with each
 // clip's transform (position/scale/rotation/opacity — docs/06 semantics,
 // CPU preview path; the D3D12 render graph replaces the drawing internals
@@ -131,8 +31,9 @@ public:
         setAttribute(Qt::WA_OpaquePaintEvent, true);
     }
 
-    void setLayers(std::vector<Layer> layers) {
+    void setLayers(std::vector<Layer> layers, QSize sequenceSize) {
         layers_ = std::move(layers);
+        sequenceSize_ = sequenceSize;
         update();
     }
 
@@ -152,17 +53,29 @@ protected:
             return;
         }
 
+        // Composite in sequence space, letterboxed into the widget — the
+        // same geometry the export compositor uses, so preview == export.
+        QSizeF canvasSize(sequenceSize_.isEmpty() ? QSizeF(size()) : QSizeF(sequenceSize_));
+        const QSizeF viewSize =
+            canvasSize.scaled(QSizeF(size()), Qt::KeepAspectRatio);
+        const QRectF viewRect(QPointF((width() - viewSize.width()) / 2.0,
+                                      (height() - viewSize.height()) / 2.0),
+                              viewSize);
+        painter.fillRect(viewRect, Qt::black); // the sequence canvas itself
+
         painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        painter.setClipRect(viewRect);
         for (const Layer& layer : layers_) {
             if (layer.image.isNull())
                 continue;
             painter.save();
-            const QSize fitSize = layer.image.size().scaled(size(), Qt::KeepAspectRatio);
+            const QSizeF fitSize =
+                QSizeF(layer.image.size()).scaled(viewSize, Qt::KeepAspectRatio);
             const QRectF baseRect(-fitSize.width() / 2.0, -fitSize.height() / 2.0,
                                   fitSize.width(), fitSize.height());
             // Normalized position offsets map to the fitted frame's dimensions.
-            painter.translate(width() / 2.0 + layer.transform.posX * fitSize.width(),
-                              height() / 2.0 + layer.transform.posY * fitSize.height());
+            painter.translate(viewRect.center().x() + layer.transform.posX * fitSize.width(),
+                              viewRect.center().y() + layer.transform.posY * fitSize.height());
             painter.rotate(layer.transform.rotation);
             painter.scale(layer.transform.scale, layer.transform.scale);
             painter.setOpacity(std::clamp(layer.transform.opacity, 0.0f, 1.0f));
@@ -173,6 +86,7 @@ protected:
 
 private:
     std::vector<Layer> layers_;
+    QSize sequenceSize_;
 };
 
 // ------------------------------------------------------------- PreviewWidget
@@ -271,14 +185,14 @@ void PreviewWidget::renderFrame() {
         // Sequential-locality read: rolls forward during playback, seeks on
         // jumps (docs/04 §2).
         if (auto frameRes = it->second->at(sample.srcPts)) {
-            QImage img = convertVideoFrameToQImage(*frameRes);
+            QImage img = toQImage(*frameRes);
             if (!img.isNull())
                 layers.push_back({std::move(img), sample.transform});
         }
     }
 
     if (videoSurface_)
-        videoSurface_->setLayers(std::move(layers));
+        videoSurface_->setLayers(std::move(layers), QSize(seq->width, seq->height));
 
     // Keep the D3D12 swapchain presenting behind the composite.
     if (device_ && swapchain_) {

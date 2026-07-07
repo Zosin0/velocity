@@ -22,7 +22,14 @@ namespace velocity::engine {
 using ClipId = std::uint64_t;
 ClipId nextClipId(); // process-wide monotonic
 
+using LinkGroupId = std::uint64_t;
+LinkGroupId nextLinkGroup(); // process-wide monotonic, 0 = unlinked
+
 enum class TrackKind { video, audio };
+
+// What a clip's asset fundamentally is. Image clips have a single source
+// frame: resolvers pin their source pts to 0 and their duration is free.
+enum class ClipKind { video, audio, image };
 
 // Static (non-animated) per-clip video transform. Normalized center offsets:
 // (0,0) = frame center; ±0.5 = half the sequence dimension. Keyframing is a
@@ -43,6 +50,14 @@ struct ClipTransform {
 struct Clip {
     ClipId id = 0;
     std::filesystem::path asset; // Phase 2: the file path is the asset identity
+    ClipKind kind = ClipKind::video;
+
+    // A/V link: clips imported from one file share a nonzero linkGroup and
+    // edit together (split/move/trim/delete). "Detach audio" sets
+    // linkDetached, which suspends the behavior but keeps the group id as
+    // sync metadata for future relinking.
+    LinkGroupId linkGroup = 0;
+    bool linkDetached = false;
 
     Tick dstStart = 0; // placement on the timeline
     Tick dstLen = 0;
@@ -62,6 +77,7 @@ struct Clip {
 
     [[nodiscard]] Tick dstEnd() const { return dstStart + dstLen; }
     [[nodiscard]] bool contains(Tick t) const { return t >= dstStart && t < dstEnd(); }
+    [[nodiscard]] bool isLinked() const { return linkGroup != 0 && !linkDetached; }
 };
 
 using ClipPtr = std::shared_ptr<const Clip>;
@@ -69,6 +85,10 @@ using ClipPtr = std::shared_ptr<const Clip>;
 struct Track {
     TrackKind kind = TrackKind::video;
     std::string name;
+    bool muted = false;  // audio tracks: excluded from the mix
+    bool hidden = false; // video tracks: excluded from resolve/composite
+    bool locked = false; // clip edits on this track are rejected
+    float gain = 1.0f;   // audio tracks: fader applied on top of clip gain
     std::vector<ClipPtr> clips; // sorted by dstStart, non-overlapping
 };
 

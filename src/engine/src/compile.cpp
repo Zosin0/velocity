@@ -16,17 +16,27 @@ const Clip* clipAt(const Track& track, Tick at) {
 }
 } // namespace
 
+namespace {
+// Image clips have exactly one source frame; their source position is always
+// the head of the stream regardless of where the playhead sits in the clip.
+std::int64_t sourcePtsAt(const Clip& c, Tick at) {
+    if (c.kind == ClipKind::image)
+        return c.srcStartPts;
+    return c.srcStartPts + ptsFromTicks(at - c.dstStart, c.srcTimebase);
+}
+} // namespace
+
 std::vector<VideoSample> resolveVideoLayersAt(const Sequence& seq, Tick at) {
     std::vector<VideoSample> layers;
     for (const auto& track : seq.tracks) {
-        if (track->kind != TrackKind::video)
+        if (track->kind != TrackKind::video || track->hidden)
             continue;
         const Clip* c = clipAt(*track, at);
         if (!c || c->hidden || c->transform.opacity <= 0.0f)
             continue;
         VideoSample s;
         s.asset = c->asset;
-        s.srcPts = c->srcStartPts + ptsFromTicks(at - c->dstStart, c->srcTimebase);
+        s.srcPts = sourcePtsAt(*c, at);
         s.srcTimebase = c->srcTimebase;
         s.clip = c->id;
         s.transform = c->transform;
@@ -38,14 +48,14 @@ std::vector<VideoSample> resolveVideoLayersAt(const Sequence& seq, Tick at) {
 std::optional<VideoSample> resolveVideoAt(const Sequence& seq, Tick at) {
     // Later-indexed video tracks render on top (docs/11); resolve top-down.
     for (auto it = seq.tracks.rbegin(); it != seq.tracks.rend(); ++it) {
-        if ((*it)->kind != TrackKind::video)
+        if ((*it)->kind != TrackKind::video || (*it)->hidden)
             continue;
         if (const Clip* c = clipAt(**it, at)) {
             if (c->hidden || c->transform.opacity <= 0.0f)
                 continue; // invisible: the track below shows through
             VideoSample s;
             s.asset = c->asset;
-            s.srcPts = c->srcStartPts + ptsFromTicks(at - c->dstStart, c->srcTimebase);
+            s.srcPts = sourcePtsAt(*c, at);
             s.srcTimebase = c->srcTimebase;
             s.clip = c->id;
             s.transform = c->transform;
@@ -59,7 +69,7 @@ std::vector<AudioSegment> audioSegmentsInRange(const Sequence& seq, Tick start, 
     std::vector<AudioSegment> out;
     const Tick end = start + len;
     for (const auto& track : seq.tracks) {
-        if (track->kind != TrackKind::audio)
+        if (track->kind != TrackKind::audio || track->muted)
             continue;
         for (const auto& c : track->clips) {
             if (c->mute)
@@ -75,7 +85,7 @@ std::vector<AudioSegment> audioSegmentsInRange(const Sequence& seq, Tick start, 
             seg.start = s;
             seg.len = e - s;
             seg.clip = c->id;
-            seg.gain = c->gain;
+            seg.gain = c->gain * track->gain; // clip fader × track fader
             seg.clipStart = c->dstStart;
             seg.clipEnd = c->dstEnd();
             seg.fadeIn = c->fadeIn;

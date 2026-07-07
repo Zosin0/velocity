@@ -4,6 +4,15 @@
 #include <velocity/foundation/log.h>
 #include <spdlog/spdlog.h>
 
+#include <QDir>
+#include <QFileInfo>
+#include <QImage>
+#include <QPainter>
+#include <QStandardPaths>
+#include <QSvgRenderer>
+
+#include <algorithm>
+
 namespace velocity::ui {
 
 DocumentSession::DocumentSession(QObject* parent)
@@ -78,19 +87,68 @@ void DocumentSession::moveSelectedClipToTrack(size_t toTrack, velocity::Tick new
     updateSnapshot(std::move(res));
 }
 
+namespace {
+// Extension-based image detection: predictable, matches the import filter.
+bool isImageFile(const std::filesystem::path& path) {
+    auto ext = path.extension().wstring();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    return ext == L".png" || ext == L".jpg" || ext == L".jpeg" || ext == L".webp" ||
+           ext == L".bmp" || ext == L".svg";
+}
+} // namespace
+
 void DocumentSession::importMedia(const std::filesystem::path& path, size_t trackIdx,
                                   std::optional<velocity::Tick> at) {
+    std::filesystem::path assetPath = path;
+
+    // SVG: rasterize once into the local cache and import the PNG (docs/00 §5
+    // — v1 rasterizes SVG at import; the engine never sees vector data).
+    if (QString::fromStdWString(path.wstring()).endsWith(".svg", Qt::CaseInsensitive)) {
+        QSvgRenderer svg(QString::fromStdWString(path.wstring()));
+        if (!svg.isValid()) {
+            emit errorOccurred("Cannot read SVG file");
+            return;
+        }
+        QSize sz = svg.defaultSize();
+        if (sz.isEmpty())
+            sz = QSize(1920, 1080);
+        // Scale up small vector art so it stays crisp when composited.
+        while (sz.width() < 1024 && sz.height() < 1024)
+            sz *= 2;
+        QImage img(sz, QImage::Format_ARGB32_Premultiplied);
+        img.fill(Qt::transparent);
+        QPainter p(&img);
+        svg.render(&p);
+        p.end();
+
+        const QString cacheDir =
+            QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) +
+            "/rasterized";
+        QDir().mkpath(cacheDir);
+        const QString outFile =
+            cacheDir + "/" +
+            QFileInfo(QString::fromStdWString(path.wstring())).completeBaseName() + "_" +
+            QString::number(qHash(QString::fromStdWString(path.wstring())), 16) + ".png";
+        if (!img.save(outFile, "PNG")) {
+            emit errorOccurred("Cannot rasterize SVG");
+            return;
+        }
+        assetPath = std::filesystem::path(outFile.toStdWString());
+    }
+
     // 1. Probe the media to get duration and basic properties
-    auto probeRes = media::probe(path);
+    auto probeRes = media::probe(assetPath);
     if (!probeRes) {
         emit errorOccurred(QString::fromStdString("Failed to probe media: " + probeRes.error().message));
         return;
     }
-    
+
     const auto& info = probeRes.value();
+    const bool isImage = isImageFile(assetPath);
     Tick duration = ticksFromSeconds(info.durationSeconds);
-    if (duration <= 0) {
-        duration = ticksFromSeconds(5.0); // default to 5 seconds if duration unknown
+    if (isImage || duration <= 0) {
+        // Images and unknown durations land as 5 s clips; images resize freely.
+        duration = ticksFromSeconds(5.0);
     }
 
     auto seq = currentSnapshot();
@@ -127,16 +185,24 @@ void DocumentSession::importMedia(const std::filesystem::path& path, size_t trac
         const Tick startPos = nextFreeStart(*videoTrack);
 
         engine::Clip v;
-        v.asset = path;
+        v.asset = assetPath;
+        v.kind = isImage ? engine::ClipKind::image : engine::ClipKind::video;
         v.dstStart = startPos;
         v.dstLen = duration;
         v.srcTimebase = info.bestVideo->timebase;
+
+        // Video + its audio edit as one linked unit until detached.
+        const bool linkAudio = hasAudio && !isImage;
+        const engine::LinkGroupId group = linkAudio ? engine::nextLinkGroup() : 0;
+        v.linkGroup = group;
         result = engine::addClip(seq, *videoTrack, std::move(v));
 
-        if (result && hasAudio) {
+        if (result && linkAudio) {
             if (const auto audioTrack = findTrack(engine::TrackKind::audio, trackIdx)) {
                 engine::Clip a;
-                a.asset = path;
+                a.asset = assetPath;
+                a.kind = engine::ClipKind::audio;
+                a.linkGroup = group;
                 a.dstStart = startPos;
                 a.dstLen = duration;
                 a.srcTimebase = info.bestAudio->timebase;
@@ -152,7 +218,8 @@ void DocumentSession::importMedia(const std::filesystem::path& path, size_t trac
             return;
         }
         engine::Clip a;
-        a.asset = path;
+        a.asset = assetPath;
+        a.kind = engine::ClipKind::audio;
         a.dstStart = nextFreeStart(*audioTrack);
         a.dstLen = duration;
         a.srcTimebase = info.bestAudio->timebase;
@@ -164,52 +231,32 @@ void DocumentSession::importMedia(const std::filesystem::path& path, size_t trac
 
 void DocumentSession::splitClipAtPlayhead() {
     auto seq = currentSnapshot();
-    // Find any clip on the current selected track or any track that intersects the playhead
-    bool splitDone = false;
-    for (size_t trackIdx = 0; trackIdx < seq->tracks.size(); ++trackIdx) {
-        // If a track is selected, prioritize it, otherwise search all
-        if (selectedTrackIdx_ && *selectedTrackIdx_ != trackIdx) {
-            continue;
-        }
-        
-        const auto& track = seq->tracks[trackIdx];
-        for (const auto& clip : track->clips) {
-            if (clip->contains(playhead_)) {
-                auto res = engine::splitClip(seq, trackIdx, clip->id, playhead_);
-                if (res) {
-                    updateSnapshot(std::move(res));
-                    splitDone = true;
-                    break;
-                }
-            }
-        }
-        if (splitDone) break;
+
+    // The selected clip wins when the playhead is inside it; otherwise the
+    // first clip under the playhead (preferring the selected track). Linked
+    // A/V companions split together so cuts never desynchronize audio.
+    engine::ClipPtr target = selectedClip();
+    if (target && !target->contains(playhead_))
+        target = nullptr;
+
+    if (!target) {
+        auto scan = [&](size_t trackIdx) -> engine::ClipPtr {
+            for (const auto& clip : seq->tracks[trackIdx]->clips)
+                if (clip->contains(playhead_))
+                    return clip;
+            return nullptr;
+        };
+        if (selectedTrackIdx_ && *selectedTrackIdx_ < seq->tracks.size())
+            target = scan(*selectedTrackIdx_);
+        for (size_t t = 0; !target && t < seq->tracks.size(); ++t)
+            target = scan(t);
     }
-    
-    if (!splitDone) {
-        // If prioritized track split didn't find anything but we did prioritize, search other tracks
-        if (selectedTrackIdx_) {
-            for (size_t trackIdx = 0; trackIdx < seq->tracks.size(); ++trackIdx) {
-                if (*selectedTrackIdx_ == trackIdx) continue;
-                const auto& track = seq->tracks[trackIdx];
-                for (const auto& clip : track->clips) {
-                    if (clip->contains(playhead_)) {
-                        auto res = engine::splitClip(seq, trackIdx, clip->id, playhead_);
-                        if (res) {
-                            updateSnapshot(std::move(res));
-                            splitDone = true;
-                            break;
-                        }
-                    }
-                }
-                if (splitDone) break;
-            }
-        }
-    }
-    
-    if (!splitDone) {
+
+    if (!target) {
         emit errorOccurred("No clip found at playhead to split");
+        return;
     }
+    updateSnapshot(engine::splitClipLinked(seq, target->id, playhead_));
 }
 
 void DocumentSession::deleteSelectedClip() {
@@ -217,7 +264,7 @@ void DocumentSession::deleteSelectedClip() {
         emit errorOccurred("No clip selected to delete");
         return;
     }
-    auto res = engine::removeClip(currentSnapshot(), *selectedTrackIdx_, *selectedClipId_);
+    auto res = engine::removeClipLinked(currentSnapshot(), *selectedClipId_);
     if (res) {
         selectedClipId_ = std::nullopt;
         selectedTrackIdx_ = std::nullopt;
@@ -230,20 +277,62 @@ void DocumentSession::deleteSelectedClip() {
 
 void DocumentSession::moveSelectedClip(velocity::Tick newStart) {
     if (!selectedClipId_ || !selectedTrackIdx_) return;
-    auto res = engine::moveClip(currentSnapshot(), *selectedTrackIdx_, *selectedClipId_, newStart);
+    auto res = engine::moveClipLinked(currentSnapshot(), *selectedClipId_, newStart);
     updateSnapshot(std::move(res));
 }
 
 void DocumentSession::trimSelectedClipHead(velocity::Tick newStart) {
     if (!selectedClipId_ || !selectedTrackIdx_) return;
-    auto res = engine::trimClipHead(currentSnapshot(), *selectedTrackIdx_, *selectedClipId_, newStart);
+    auto res = engine::trimClipLinkedHead(currentSnapshot(), *selectedClipId_, newStart);
     updateSnapshot(std::move(res));
 }
 
 void DocumentSession::trimSelectedClipTail(velocity::Tick newEnd) {
     if (!selectedClipId_ || !selectedTrackIdx_) return;
-    auto res = engine::trimClipTail(currentSnapshot(), *selectedTrackIdx_, *selectedClipId_, newEnd);
+    auto res = engine::trimClipLinkedTail(currentSnapshot(), *selectedClipId_, newEnd);
     updateSnapshot(std::move(res));
+}
+
+void DocumentSession::detachAudioFromSelectedClip() {
+    if (!selectedClipId_) {
+        emit errorOccurred("No clip selected");
+        return;
+    }
+    updateSnapshot(engine::detachLink(currentSnapshot(), *selectedClipId_));
+}
+
+void DocumentSession::addTrack(engine::TrackKind kind) {
+    // Inserting a video track shifts audio indices; keep selection valid by
+    // re-resolving it from the clip id after the edit.
+    const auto keepClip = selectedClipId_;
+    auto res = engine::addTrack(currentSnapshot(), kind);
+    updateSnapshot(std::move(res));
+    if (keepClip)
+        reselectClip(*keepClip);
+}
+
+void DocumentSession::removeTrack(size_t trackIdx) {
+    const auto keepClip = selectedClipId_;
+    auto res = engine::removeTrack(currentSnapshot(), trackIdx);
+    updateSnapshot(std::move(res));
+    if (keepClip)
+        reselectClip(*keepClip);
+}
+
+void DocumentSession::updateTrack(size_t trackIdx,
+                                  const std::function<void(engine::Track&)>& mutate) {
+    updateSnapshot(engine::updateTrack(currentSnapshot(), trackIdx, mutate));
+}
+
+void DocumentSession::reselectClip(engine::ClipId id) {
+    auto seq = currentSnapshot();
+    for (size_t t = 0; t < seq->tracks.size(); ++t)
+        for (const auto& c : seq->tracks[t]->clips)
+            if (c->id == id) {
+                selectClip(id, t);
+                return;
+            }
+    selectClip(std::nullopt, std::nullopt);
 }
 
 void DocumentSession::setPlayhead(velocity::Tick tick) {

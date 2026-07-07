@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 
 #include <fstream>
+#include <map>
 
 namespace velocity::engine {
 
@@ -10,9 +11,29 @@ using json = nlohmann::json;
 
 namespace {
 
+const char* kindName(ClipKind k) {
+    switch (k) {
+    case ClipKind::audio: return "audio";
+    case ClipKind::image: return "image";
+    case ClipKind::video: break;
+    }
+    return "video";
+}
+
+ClipKind kindFromName(const std::string& s) {
+    if (s == "audio")
+        return ClipKind::audio;
+    if (s == "image")
+        return ClipKind::image;
+    return ClipKind::video;
+}
+
 json toJson(const Clip& c) {
     return json{
         {"asset", reinterpret_cast<const char*>(c.asset.u8string().c_str())},
+        {"kind", kindName(c.kind)},
+        {"linkGroup", c.linkGroup},
+        {"linkDetached", c.linkDetached},
         {"dstStart", c.dstStart},
         {"dstLen", c.dstLen},
         {"srcStartPts", c.srcStartPts},
@@ -37,6 +58,9 @@ Clip clipFromJson(const json& j) {
     const std::string assetUtf8 = j.at("asset").get<std::string>();
     c.asset = std::filesystem::path(
         std::u8string(reinterpret_cast<const char8_t*>(assetUtf8.c_str())));
+    c.kind = kindFromName(j.value("kind", std::string{"video"}));
+    c.linkGroup = j.value("linkGroup", LinkGroupId{0}); // remapped after load
+    c.linkDetached = j.value("linkDetached", false);
     c.dstStart = j.at("dstStart").get<Tick>();
     c.dstLen = j.at("dstLen").get<Tick>();
     c.srcStartPts = j.at("srcStartPts").get<std::int64_t>();
@@ -68,6 +92,10 @@ std::string serializeProject(const Sequence& seq) {
         tracks.push_back(json{
             {"kind", track->kind == TrackKind::video ? "video" : "audio"},
             {"name", track->name},
+            {"muted", track->muted},
+            {"hidden", track->hidden},
+            {"locked", track->locked},
+            {"gain", track->gain},
             {"clips", std::move(clips)},
         });
     }
@@ -105,13 +133,30 @@ Expected<SnapshotPtr, std::string> deserializeProject(const std::string& text) {
                           s.at("frameRate").at(1).get<std::int64_t>()};
         seq->audioRate = s.value("audioRate", 48000);
 
+        // Persisted link-group ids come from an older session's counter;
+        // remap them to fresh ids so new imports never collide into a
+        // loaded group.
+        std::map<LinkGroupId, LinkGroupId> groupRemap;
+
         for (const json& jt : s.at("tracks")) {
             auto track = std::make_shared<Track>();
             track->kind =
                 jt.at("kind").get<std::string>() == "video" ? TrackKind::video : TrackKind::audio;
             track->name = jt.value("name", std::string{});
-            for (const json& jc : jt.at("clips"))
-                track->clips.push_back(std::make_shared<const Clip>(clipFromJson(jc)));
+            track->muted = jt.value("muted", false);
+            track->hidden = jt.value("hidden", false);
+            track->locked = jt.value("locked", false);
+            track->gain = jt.value("gain", 1.0f);
+            for (const json& jc : jt.at("clips")) {
+                Clip c = clipFromJson(jc);
+                if (c.linkGroup != 0) {
+                    auto [it, inserted] = groupRemap.try_emplace(c.linkGroup, 0);
+                    if (inserted)
+                        it->second = nextLinkGroup();
+                    c.linkGroup = it->second;
+                }
+                track->clips.push_back(std::make_shared<const Clip>(std::move(c)));
+            }
             // Restore invariant: sorted, non-overlapping.
             std::sort(track->clips.begin(), track->clips.end(),
                       [](const ClipPtr& a, const ClipPtr& b) { return a->dstStart < b->dstStart; });

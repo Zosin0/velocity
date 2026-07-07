@@ -38,6 +38,11 @@ public:
     Expected<void, MediaError> writeVideoFrame(const VideoFrame& frame);
     Expected<void, MediaError> writeBlackFrame();
 
+    // Appends a composited RGBA canvas (any size; converted/scaled like
+    // writeVideoFrame). strideBytes is the byte distance between rows.
+    Expected<void, MediaError> writeRgbaFrame(const std::uint8_t* rgba, int width, int height,
+                                              int strideBytes);
+
     // Appends interleaved float32 audio at the export rate.
     Expected<void, MediaError> writeAudio(const float* interleaved, int frames);
 

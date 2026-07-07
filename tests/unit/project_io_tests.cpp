@@ -18,6 +18,8 @@ SnapshotPtr richSequence() {
     auto seq = makeSequence(1280, 720, {30000, 1001}, 2, 1);
     Clip v;
     v.asset = L"C:/media/vídeo ünïcode.mp4"; // exercises UTF-8 path round-trip
+    v.kind = ClipKind::video;
+    v.linkGroup = 7;
     v.dstStart = kSec;
     v.dstLen = 2 * kSec;
     v.srcStartPts = 3003;
@@ -26,8 +28,18 @@ SnapshotPtr richSequence() {
     v.hidden = false;
     auto s = addClip(seq, 0, v);
 
+    Clip img;
+    img.asset = "C:/media/logo.png";
+    img.kind = ClipKind::image;
+    img.dstStart = 4 * kSec;
+    img.dstLen = 5 * kSec;
+    s = addClip(*s, 1, img);
+
     Clip a;
     a.asset = "C:/media/music.mp3";
+    a.kind = ClipKind::audio;
+    a.linkGroup = 7;
+    a.linkDetached = true;
     a.dstStart = 0;
     a.dstLen = 3 * kSec;
     a.srcTimebase = {1, 44100};
@@ -36,6 +48,16 @@ SnapshotPtr richSequence() {
     a.fadeIn = kSec / 2;
     a.fadeOut = kSec / 4;
     s = addClip(*s, 2, a);
+
+    // Track-level state persists too.
+    s = updateTrack(*s, 1, [](Track& t) {
+        t.hidden = true;
+        t.locked = true;
+    });
+    s = updateTrack(*s, 2, [](Track& t) {
+        t.muted = true;
+        t.gain = 0.6f;
+    });
     EXPECT_TRUE(s.hasValue());
     return *s;
 }
@@ -71,6 +93,21 @@ TEST(ProjectIo, RoundTripPreservesEverything) {
     EXPECT_TRUE(a.mute);
     EXPECT_EQ(a.fadeIn, kSec / 2);
     EXPECT_EQ(a.fadeOut, kSec / 4);
+
+    // New fields: kind, link metadata (groups are remapped to fresh session
+    // ids on load but members stay grouped), track flags/gain.
+    EXPECT_EQ(v.kind, ClipKind::video);
+    EXPECT_EQ(a.kind, ClipKind::audio);
+    EXPECT_EQ(r.tracks[1]->clips[0]->kind, ClipKind::image);
+    EXPECT_NE(v.linkGroup, 0u);
+    EXPECT_EQ(v.linkGroup, a.linkGroup);
+    EXPECT_FALSE(v.linkDetached);
+    EXPECT_TRUE(a.linkDetached);
+
+    EXPECT_TRUE(r.tracks[1]->hidden);
+    EXPECT_TRUE(r.tracks[1]->locked);
+    EXPECT_TRUE(r.tracks[2]->muted);
+    EXPECT_FLOAT_EQ(r.tracks[2]->gain, 0.6f);
 }
 
 TEST(ProjectIo, SaveLoadFileRoundTrip) {

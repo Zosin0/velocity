@@ -7,7 +7,10 @@
 #include <ui/shell/theming.h>
 
 #include <QApplication>
+#include <QTimer>
 #include <spdlog/spdlog.h>
+
+#include <cstring>
 
 int main(int argc, char* argv[]) {
     velocity::log::init("velocity");
@@ -28,6 +31,17 @@ int main(int argc, char* argv[]) {
 
     velocity::ui::MainWindow win;
     win.show();
+
+    // CI launch check: bring the full UI up, spin the event loop briefly,
+    // then exit cleanly. A crash during init fails the step; a clean start
+    // exits 0 instead of blocking the runner forever.
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--smoke") == 0) {
+            spdlog::info("smoke mode: exiting after event-loop warmup");
+            QTimer::singleShot(3000, &app, &QCoreApplication::quit);
+            break;
+        }
+    }
 
     spdlog::info("entering event loop");
     const int code = app.exec();

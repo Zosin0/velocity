@@ -41,6 +41,15 @@ public:
     void trimSelectedClipTail(velocity::Tick newEnd);
     void updateSelectedClip(const std::function<void(engine::Clip&)>& mutate);
 
+    // Suspends the A/V link of the selected clip's group: afterwards the
+    // audio and video move/trim/delete independently (sync metadata kept).
+    void detachAudioFromSelectedClip();
+
+    // Track management.
+    void addTrack(engine::TrackKind kind);
+    void removeTrack(size_t trackIdx);
+    void updateTrack(size_t trackIdx, const std::function<void(engine::Track&)>& mutate);
+
     // Interactive gesture coalescing: between begin/end, edits replace the
     // top undo entry instead of pushing — one gesture, one undo step.
     void beginGesture();
@@ -69,6 +78,7 @@ signals:
 
 private:
     void updateSnapshot(engine::EditResult&& result);
+    void reselectClip(engine::ClipId id);
 
     std::unique_ptr<engine::UndoStack> undoStack_;
     velocity::Tick playhead_ = 0;

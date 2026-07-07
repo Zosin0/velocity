@@ -22,6 +22,7 @@ struct ExportSettings {
     std::int64_t videoBitrate = 8'000'000;
     std::int64_t audioBitrate = 192'000;
     bool preferHardwareEncoder = true;
+    float masterGain = 1.0f; // master fader applied after the track sum
 };
 
 struct ExportResult {

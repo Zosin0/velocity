@@ -4,6 +4,7 @@ add_library(velocity_media STATIC
     src/video_decoder.cpp
     src/audio_decoder.cpp
     src/mp4_writer.cpp
+    src/frame_rgba.cpp
 )
 target_include_directories(velocity_media PUBLIC include)
 target_link_libraries(velocity_media

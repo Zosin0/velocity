@@ -41,6 +41,8 @@ add_executable(velocity_unit_tests
     gpu_tests.cpp
     audio_tests.cpp
     model_tests.cpp
+    linked_edit_tests.cpp
+    compositor_tests.cpp
     export_tests.cpp
     audio_mix_tests.cpp
     project_io_tests.cpp

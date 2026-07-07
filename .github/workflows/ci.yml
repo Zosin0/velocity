@@ -28,34 +28,15 @@ jobs:
           target: 'desktop'
           arch: 'win64_msvc2019_64'
           setup-python: false
-        
-      - name: Debug Qt Installation
-        shell: powershell
-        run: |
-          Write-Host "PATH=$env:PATH"
-      
-          Get-ChildItem C:\ -Directory -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -eq "Qt6" } |
-            Select-Object FullName
-      
-          Get-ChildItem C:\ -Filter Qt6Config.cmake -Recurse -ErrorAction SilentlyContinue |
-            Select-Object -First 20 FullName
 
       - name: Configure
         shell: powershell
         run: |
           . tools/devshell.ps1
-      
-          $qtPath = Get-ChildItem "$env:RUNNER_WORKSPACE" -Directory -Recurse |
-            Where-Object { $_.FullName -match "6\.6\.2.*msvc" } |
-            Select-Object -First 1 -ExpandProperty FullName
-      
-          cmake `
-            -DCMAKE_PREFIX_PATH="$qtPath" `
-            --preset release
-      
+          # install-qt-action exports QT_ROOT_DIR pointing at the arch prefix.
+          cmake -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" --preset release
           if ($LASTEXITCODE -ne 0) { exit 1 }
-      
+
       - name: Build
         shell: powershell
         run: |
@@ -73,16 +54,24 @@ jobs:
       - name: Launch smoke check
         shell: powershell
         run: |
-          ./build/release/bin/velocity.exe
+          # --smoke spins the full UI event loop for ~3 s then exits 0.
+          ./build/release/bin/velocity.exe --smoke
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
-      - name: Upload Executable Artifact
-        if: startsWith(github.ref, 'refs/heads/release/')
+      - name: Package portable app
+        shell: powershell
+        run: |
+          # bin/ already contains velocity.exe + Qt runtime (windeployqt
+          # post-build) + FFmpeg DLLs — a self-contained, runnable folder.
+          Compress-Archive -Path build/release/bin/* -DestinationPath velocity-windows-x64.zip
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Upload portable app artifact
         uses: actions/upload-artifact@v4
         with:
-          name: velocity-exe
-          path: build/release/bin/velocity.exe
-          retention-days: 2
+          name: velocity-windows-x64
+          path: velocity-windows-x64.zip
+          retention-days: 14
 
   release-publish:
     needs: build-test
@@ -98,13 +87,13 @@ jobs:
         uses: mathieudutour/github-tag-action@v6.2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          default_bump: patch 
+          default_bump: patch
           tag_prefix: v
 
-      - name: Download Executable Artifact
+      - name: Download portable app artifact
         uses: actions/download-artifact@v4
         with:
-          name: velocity-exe
+          name: velocity-windows-x64
           path: .
 
       - name: Create GitHub Release
@@ -112,5 +101,5 @@ jobs:
         with:
           tag_name: ${{ steps.tag_version.outputs.new_tag }}
           name: Release ${{ steps.tag_version.outputs.new_tag }}
-          files: velocity.exe
+          files: velocity-windows-x64.zip
           generate_release_notes: true

@@ -2,6 +2,7 @@ add_library(velocity_engine STATIC
     src/edits.cpp
     src/compile.cpp
     src/export.cpp
+    src/compositor.cpp
     src/audio_mix.cpp
     src/project_io.cpp
 )
