@@ -1,0 +1,131 @@
+/* Paleta de Cores */
+:root {
+    --black-piano: #050505; /* Preto super escuro */
+    --off-white: #f4f4f5;   /* Branco suave */
+    --gray: #888888;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+body {
+    background-color: var(--black-piano);
+    color: var(--off-white);
+    overflow: hidden; /* Evita scroll horizontal com a animação */
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+/* Navbar */
+.navbar {
+    padding: 2rem 4vw;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.logo {
+    font-size: 1.5rem;
+    font-weight: 900;
+    letter-spacing: -1.5px;
+    color: var(--off-white);
+}
+
+/* Hero Section */
+.hero {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    position: relative;
+    padding: 0 2rem;
+    margin-top: -10vh; /* Ajuste para centralizar visualmente */
+}
+
+.content h1 {
+    font-size: clamp(3rem, 6vw, 5.5rem);
+    font-weight: 700;
+    line-height: 1.05;
+    margin-bottom: 1.5rem;
+    letter-spacing: -2px;
+    /* Efeito de brilho moderno no texto */
+    background: linear-gradient(180deg, #ffffff 0%, #777777 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.content p {
+    font-size: clamp(1rem, 2vw, 1.25rem);
+    color: var(--gray);
+    margin-bottom: 3rem;
+    font-weight: 400;
+    letter-spacing: -0.5px;
+}
+
+/* Botão de Download */
+.cta-button {
+    display: inline-block;
+    background-color: var(--off-white);
+    color: var(--black-piano);
+    text-decoration: none;
+    padding: 1.2rem 3rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    border-radius: 50px;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+    cursor: pointer;
+}
+
+.cta-button:hover {
+    transform: translateY(-3px) scale(1.02);
+    box-shadow: 0 10px 30px rgba(244, 244, 245, 0.15);
+}
+
+/* --- ANIMAÇÃO DO BONECO DE VELOCIDADE --- */
+.runner-container {
+    position: absolute;
+    bottom: 5%;
+    width: 100vw;
+    height: 80px;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05); /* Uma linha sutil imitando o chão */
+}
+
+.runner {
+    width: 64px;
+    height: 64px;
+    color: var(--off-white);
+    position: absolute;
+    left: -100px; /* Começa fora da tela pela esquerda */
+    /* Animação que dura 3s e repete infinitamente */
+    animation: runAcross 3s cubic-bezier(0.5, 0, 0.1, 1) infinite;
+}
+
+/* Piscar das linhas de vento atrás dele */
+.speed-line {
+    animation: wind 0.15s infinite alternate;
+}
+.sl-2 { animation-delay: 0.05s; }
+.sl-3 { animation-delay: 0.1s; }
+
+@keyframes runAcross {
+    0% {
+        transform: translateX(0) skewX(-20deg); /* Inclinado para frente por causa da velocidade */
+    }
+    100% {
+        transform: translateX(110vw) skewX(-20deg); /* Atravessa toda a tela */
+    }
+}
+
+@keyframes wind {
+    0% { stroke-dasharray: 2 4; stroke-opacity: 0.2; transform: translateX(0); }
+    100% { stroke-dasharray: 8 2; stroke-opacity: 1; transform: translateX(-5px); }
+}

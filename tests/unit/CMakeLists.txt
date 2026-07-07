@@ -19,9 +19,19 @@ add_custom_command(
             -t 4 -c:v libopenh264 -pix_fmt yuv420p ${VELOCITY_TESTMEDIA_DIR}/counting_ntsc.mp4
     COMMENT "Generating counting_ntsc.mp4 (120 frames @ 29.97)")
 
+add_custom_command(
+    OUTPUT ${VELOCITY_TESTMEDIA_DIR}/counting_av.mp4
+    COMMAND ${_ffmpeg_exe} -y -loglevel error
+            -f lavfi -i testsrc2=size=320x240:rate=30
+            -f lavfi -i sine=frequency=440:sample_rate=48000
+            -t 2 -c:v libopenh264 -pix_fmt yuv420p -c:a aac -ac 2 -shortest
+            ${VELOCITY_TESTMEDIA_DIR}/counting_av.mp4
+    COMMENT "Generating counting_av.mp4 (60 frames + 440Hz tone)")
+
 add_custom_target(velocity_testmedia DEPENDS
     ${VELOCITY_TESTMEDIA_DIR}/counting_30fps.mp4
-    ${VELOCITY_TESTMEDIA_DIR}/counting_ntsc.mp4)
+    ${VELOCITY_TESTMEDIA_DIR}/counting_ntsc.mp4
+    ${VELOCITY_TESTMEDIA_DIR}/counting_av.mp4)
 
 # --- Unit tests ----------------------------------------------------------------
 add_executable(velocity_unit_tests
@@ -31,6 +41,7 @@ add_executable(velocity_unit_tests
     gpu_tests.cpp
     audio_tests.cpp
     model_tests.cpp
+    export_tests.cpp
 )
 target_link_libraries(velocity_unit_tests PRIVATE
     velocity_options

@@ -6,6 +6,7 @@
 #include "../timeline/timeline_widget.h"
 #include "../inspector/inspector_widget.h"
 #include "../mixer/mixer_widget.h"
+#include "../exportdlg/export_dialog.h"
 #include "theming.h"
 
 #include <QDockWidget>
@@ -337,22 +338,8 @@ void MainWindow::onExportVideo() {
         return;
     }
 
-    QString savePath = QFileDialog::getSaveFileName(
-        this,
-        "Export Video File",
-        "output.mp4",
-        "MPEG-4 Video (*.mp4)"
-    );
-
-    if (savePath.isEmpty()) return;
-
-    statusBar()->showMessage("Exporting project... Rendering timeline to H.264 MP4");
-    
-    // Simulate export progress
-    QTimer::singleShot(2000, this, [this]() {
-        statusBar()->showMessage("Project Export Complete.", 5000);
-        QMessageBox::information(this, "Export", "Timeline rendered and exported successfully to MP4.");
-    });
+    ExportDialog dialog(seq, this);
+    dialog.exec();
 }
 
 void MainWindow::onPlayPauseToggled() {

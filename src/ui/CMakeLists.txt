@@ -16,6 +16,8 @@ add_library(velocity_ui STATIC
     bin/media_bin_widget.cpp
     mixer/mixer_widget.h
     mixer/mixer_widget.cpp
+    exportdlg/export_dialog.h
+    exportdlg/export_dialog.cpp
 )
 
 target_include_directories(velocity_ui PUBLIC
