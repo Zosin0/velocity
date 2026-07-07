@@ -46,3 +46,42 @@ jobs:
         run: |
           ./build/release/bin/velocity.exe
           if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Upload Executable Artifact
+        if: startsWith(github.ref, 'refs/heads/release/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: velocity-exe
+          path: build/release/bin/velocity.exe
+          retention-days: 1
+
+  release-publish:
+    needs: build-test
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch 
+          tag_prefix: v
+
+      - name: Download Executable Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: velocity-exe
+          path: .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag_version.outputs.new_tag }}
+          name: Release ${{ steps.tag_version.outputs.new_tag }}
+          files: velocity.exe
+          generate_release_notes: true

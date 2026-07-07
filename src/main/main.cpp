@@ -1,8 +1,11 @@
+// Velocity entry point: verify the FFmpeg runtime, then launch the Qt shell.
+
 #include <velocity/foundation/log.h>
 #include <velocity/media/ffmpeg_info.h>
 
 #include <ui/shell/mainwindow.h>
 #include <ui/shell/theming.h>
+
 #include <QApplication>
 #include <spdlog/spdlog.h>
 
@@ -26,8 +29,8 @@ int main(int argc, char* argv[]) {
     velocity::ui::MainWindow win;
     win.show();
 
-    spdlog::info("Entering GUI event loop");
-    int code = app.exec();
-    spdlog::info("Clean exit with code {}", code);
+    spdlog::info("entering event loop");
+    const int code = app.exec();
+    spdlog::info("clean exit with code {}", code);
     return code;
 }
