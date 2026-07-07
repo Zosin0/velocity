@@ -29,6 +29,9 @@ protected:
     void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private:
     // Layout and sizing coordinates
@@ -49,9 +52,14 @@ private:
     double tickToX(velocity::Tick tick) const;
     velocity::Tick xToTick(double x) const;
     void updateScrollRanges();
+    [[nodiscard]] int trackIndexAtY(int y) const;
+    // Snaps `tick` to nearby edit points/playhead/origin within a pixel radius.
+    [[nodiscard]] velocity::Tick snapTick(velocity::Tick tick,
+                                          std::optional<velocity::engine::ClipId> ignore) const;
 
     DocumentSession* session_;
     QScrollBar* hScrollBar_;
+    class WaveformCache* waveforms_;
 
     // Viewing state
     double pixelsPerSecond_ = 120.0; // zoom factor

@@ -20,6 +20,8 @@ add_library(velocity_ui STATIC
     exportdlg/export_dialog.cpp
     playback/playback_controller.h
     playback/playback_controller.cpp
+    services/waveform_cache.h
+    services/waveform_cache.cpp
 )
 
 target_include_directories(velocity_ui PUBLIC
@@ -34,4 +36,5 @@ target_link_libraries(velocity_ui PUBLIC
     velocity::media
     velocity::audio
     Qt6::Widgets
+    Qt6::Concurrent
 )

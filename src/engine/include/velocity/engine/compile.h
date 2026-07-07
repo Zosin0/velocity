@@ -21,6 +21,9 @@ struct VideoSample {
 // Topmost video-track clip covering `at`; nullopt = black/silence gap.
 std::optional<VideoSample> resolveVideoAt(const Sequence& seq, Tick at);
 
+// All visible video layers covering `at`, bottom-to-top (compositing order).
+std::vector<VideoSample> resolveVideoLayersAt(const Sequence& seq, Tick at);
+
 struct AudioSegment {
     std::filesystem::path asset;
     std::int64_t srcStartPts = 0; // source position corresponding to `start`

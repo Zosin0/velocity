@@ -16,6 +16,25 @@ const Clip* clipAt(const Track& track, Tick at) {
 }
 } // namespace
 
+std::vector<VideoSample> resolveVideoLayersAt(const Sequence& seq, Tick at) {
+    std::vector<VideoSample> layers;
+    for (const auto& track : seq.tracks) {
+        if (track->kind != TrackKind::video)
+            continue;
+        const Clip* c = clipAt(*track, at);
+        if (!c || c->hidden || c->transform.opacity <= 0.0f)
+            continue;
+        VideoSample s;
+        s.asset = c->asset;
+        s.srcPts = c->srcStartPts + ptsFromTicks(at - c->dstStart, c->srcTimebase);
+        s.srcTimebase = c->srcTimebase;
+        s.clip = c->id;
+        s.transform = c->transform;
+        layers.push_back(std::move(s));
+    }
+    return layers;
+}
+
 std::optional<VideoSample> resolveVideoAt(const Sequence& seq, Tick at) {
     // Later-indexed video tracks render on top (docs/11); resolve top-down.
     for (auto it = seq.tracks.rbegin(); it != seq.tracks.rend(); ++it) {

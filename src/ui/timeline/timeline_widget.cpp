@@ -1,4 +1,5 @@
 #include "timeline_widget.h"
+#include "../services/waveform_cache.h"
 #include "../shell/documentsession.h"
 
 #include <QPainter>
@@ -9,6 +10,9 @@
 #include <QVBoxLayout>
 #include <QStyleOption>
 #include <QFileInfo>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QMimeData>
 #include <cmath>
 #include <algorithm>
 
@@ -20,6 +24,10 @@ TimelineWidget::TimelineWidget(DocumentSession* session, QWidget* parent)
 {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
+    setAcceptDrops(true);
+
+    waveforms_ = new WaveformCache(this);
+    connect(waveforms_, &WaveformCache::waveformReady, this, [this](const QString&) { update(); });
 
     // Setup scrollbar
     hScrollBar_ = new QScrollBar(Qt::Horizontal, this);
@@ -122,6 +130,68 @@ TimelineWidget::HitResult TimelineWidget::hitTest(const QPoint& pos) {
     }
 
     return result;
+}
+
+int TimelineWidget::trackIndexAtY(int y) const {
+    if (y <= kRulerHeight)
+        return -1;
+    const int idx = (y - kRulerHeight) / (kTrackHeight + kTrackGap);
+    if (idx < 0 || idx >= static_cast<int>(session_->currentSnapshot()->tracks.size()))
+        return -1;
+    return idx;
+}
+
+Tick TimelineWidget::snapTick(Tick tick, std::optional<engine::ClipId> ignore) const {
+    // Magnet radius: 8 screen pixels expressed in ticks at the current zoom.
+    const Tick radius = static_cast<Tick>(8.0 / pixelsPerSecond_ * kTickRate);
+
+    Tick best = tick;
+    Tick bestDist = radius + 1;
+    auto consider = [&](Tick candidate) {
+        const Tick d = std::abs(candidate - tick);
+        if (d < bestDist) {
+            bestDist = d;
+            best = candidate;
+        }
+    };
+
+    consider(0);
+    consider(session_->playhead());
+    for (const auto& track : session_->currentSnapshot()->tracks) {
+        for (const auto& c : track->clips) {
+            if (ignore && c->id == *ignore)
+                continue;
+            consider(c->dstStart);
+            consider(c->dstEnd());
+        }
+    }
+    return bestDist <= radius ? best : tick;
+}
+
+void TimelineWidget::dragEnterEvent(QDragEnterEvent* event) {
+    if (event->mimeData()->hasUrls())
+        event->acceptProposedAction();
+}
+
+void TimelineWidget::dragMoveEvent(QDragMoveEvent* event) {
+    if (event->mimeData()->hasUrls())
+        event->acceptProposedAction();
+}
+
+void TimelineWidget::dropEvent(QDropEvent* event) {
+    if (!event->mimeData()->hasUrls())
+        return;
+    const QPoint pos = event->position().toPoint();
+    const int track = trackIndexAtY(pos.y());
+    const Tick at = std::max<Tick>(snapTick(xToTick(pos.x()), std::nullopt), 0);
+
+    for (const QUrl& url : event->mimeData()->urls()) {
+        if (!url.isLocalFile())
+            continue;
+        const std::filesystem::path path = url.toLocalFile().toStdWString();
+        session_->importMedia(path, track >= 0 ? static_cast<size_t>(track) : 0, at);
+    }
+    event->acceptProposedAction();
 }
 
 void TimelineWidget::zoomIn() {
@@ -249,15 +319,56 @@ void TimelineWidget::paintEvent(QPaintEvent* event) {
             painter.setPen(isSelected ? QColor(255, 255, 255) : baseColor.darker(150));
             painter.drawRect(clipRect);
 
-            // Draw waveform sketches for audio clips
+            // Real waveforms for audio clips (background-generated peaks)
             if (track->kind == engine::TrackKind::audio) {
-                painter.setPen(QColor(10, 110, 80, 100));
-                // Sketch static waves
-                int waveStep = 6;
-                for (int wx = static_cast<int>(startX) + 4; wx < static_cast<int>(endX) - 4; wx += waveStep) {
-                    int waveH = (kTrackHeight - 12) * (0.3f + 0.6f * std::sin(wx * 0.05f));
-                    painter.drawLine(wx, trackY + kTrackHeight / 2 - waveH / 2, wx, trackY + kTrackHeight / 2 + waveH / 2);
+                const QVector<float>* peaks = waveforms_->peaksFor(clip->asset);
+                if (peaks && !peaks->isEmpty()) {
+                    painter.setPen(QColor(6, 78, 59, 200));
+                    const int midY = trackY + kTrackHeight / 2;
+                    const int maxH = kTrackHeight - 14;
+                    // Source sample offset of the clip's in-point (ticks==samples).
+                    const std::int64_t srcBase =
+                        ticksFromPts(clip->srcStartPts, clip->srcTimebase);
+                    const int x0 = std::max(static_cast<int>(startX), kHeaderWidth);
+                    const int x1 = std::min(static_cast<int>(endX), viewWidth);
+                    for (int wx = x0; wx < x1; wx += 2) {
+                        const Tick t = xToTick(wx);
+                        const std::int64_t srcSample = srcBase + (t - clip->dstStart);
+                        const int bin =
+                            static_cast<int>(srcSample / (kTickRate / WaveformCache::kBinsPerSecond));
+                        if (bin < 0 || bin >= peaks->size())
+                            continue;
+                        const int h = std::max(1, static_cast<int>((*peaks)[bin] * maxH));
+                        painter.drawLine(wx, midY - h / 2, wx, midY + h / 2);
+                    }
+                } else {
+                    // Peaks still generating: subtle center line placeholder
+                    painter.setPen(QColor(6, 78, 59, 120));
+                    const int midY = trackY + kTrackHeight / 2;
+                    painter.drawLine(static_cast<int>(startX) + 4, midY,
+                                     static_cast<int>(endX) - 4, midY);
                 }
+            }
+
+            // Fade triangles on audio clips
+            if (track->kind == engine::TrackKind::audio &&
+                (clip->fadeIn > 0 || clip->fadeOut > 0)) {
+                painter.setPen(QPen(QColor(255, 255, 255, 130), 1));
+                if (clip->fadeIn > 0) {
+                    const double fx = tickToX(clip->dstStart + clip->fadeIn);
+                    painter.drawLine(QPointF(startX, trackY + kTrackHeight - 4),
+                                     QPointF(fx, trackY + 4));
+                }
+                if (clip->fadeOut > 0) {
+                    const double fx = tickToX(clip->dstEnd() - clip->fadeOut);
+                    painter.drawLine(QPointF(fx, trackY + 4),
+                                     QPointF(endX, trackY + kTrackHeight - 4));
+                }
+            }
+
+            // Muted / hidden indicator
+            if (clip->mute || clip->hidden) {
+                painter.fillRect(clipRect, QColor(0, 0, 0, 110));
             }
 
             // Draw File Label
@@ -329,17 +440,31 @@ void TimelineWidget::mouseMoveEvent(QMouseEvent* event) {
     } else if (interaction_ == InteractionState::draggingClip && activeHit_.clip) {
         double deltaSec = (event->pos().x() - dragStartPos_.x()) / pixelsPerSecond_;
         Tick deltaTicks = ticksFromSeconds(deltaSec);
-        Tick newStart = dragStartClipOffset_ + deltaTicks;
+        Tick newStart = snapTick(std::max<Tick>(dragStartClipOffset_ + deltaTicks, 0),
+                                 activeHit_.clipId);
+
+        // Vertical drag: move to another track of the same kind.
+        const int targetTrack = trackIndexAtY(event->pos().y());
+        const auto curTrack = session_->selectedTrackIdx();
+        if (targetTrack >= 0 && curTrack && static_cast<size_t>(targetTrack) != *curTrack) {
+            auto seq = session_->currentSnapshot();
+            if (seq->tracks[static_cast<size_t>(targetTrack)]->kind ==
+                seq->tracks[*curTrack]->kind) {
+                session_->moveSelectedClipToTrack(static_cast<size_t>(targetTrack), newStart);
+                return;
+            }
+        }
         session_->moveSelectedClip(newStart);
     } else if (interaction_ == InteractionState::trimmingHead && activeHit_.clip) {
         double deltaSec = (event->pos().x() - dragStartPos_.x()) / pixelsPerSecond_;
         Tick deltaTicks = ticksFromSeconds(deltaSec);
-        Tick newStart = dragStartClipOffset_ + deltaTicks;
+        Tick newStart = snapTick(dragStartClipOffset_ + deltaTicks, activeHit_.clipId);
         session_->trimSelectedClipHead(newStart);
     } else if (interaction_ == InteractionState::trimmingTail && activeHit_.clip) {
         double deltaSec = (event->pos().x() - dragStartPos_.x()) / pixelsPerSecond_;
         Tick deltaTicks = ticksFromSeconds(deltaSec);
-        Tick newEnd = dragStartClipOffset_ + dragStartClipLen_ + deltaTicks;
+        Tick newEnd = snapTick(dragStartClipOffset_ + dragStartClipLen_ + deltaTicks,
+                               activeHit_.clipId);
         session_->trimSelectedClipTail(newEnd);
     } else {
         // Handle cursor visual feedback on hover

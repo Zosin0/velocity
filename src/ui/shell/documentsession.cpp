@@ -78,7 +78,8 @@ void DocumentSession::moveSelectedClipToTrack(size_t toTrack, velocity::Tick new
     updateSnapshot(std::move(res));
 }
 
-void DocumentSession::importMedia(const std::filesystem::path& path, size_t trackIdx) {
+void DocumentSession::importMedia(const std::filesystem::path& path, size_t trackIdx,
+                                  std::optional<velocity::Tick> at) {
     // 1. Probe the media to get duration and basic properties
     auto probeRes = media::probe(path);
     if (!probeRes) {
@@ -104,8 +105,10 @@ void DocumentSession::importMedia(const std::filesystem::path& path, size_t trac
         return std::nullopt;
     };
 
-    // Landing position: end of existing content on the chosen track.
+    // Landing position: requested tick (drop), else end of track content.
     auto nextFreeStart = [&](size_t track) -> Tick {
+        if (at)
+            return std::max<Tick>(*at, 0);
         const auto& clips = seq->tracks[track]->clips;
         return clips.empty() ? 0 : clips.back()->dstEnd();
     };

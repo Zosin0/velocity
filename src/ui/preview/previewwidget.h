@@ -4,8 +4,9 @@
 #include <velocity/gpu/swapchain.h>
 
 #include <QWidget>
-#include <memory>
 #include <filesystem>
+#include <map>
+#include <memory>
 #include <QImage>
 
 namespace velocity::media {
@@ -40,8 +41,7 @@ private:
 
     // Video preview components
     VideoSurfaceWidget* videoSurface_ = nullptr;
-    std::filesystem::path currentAssetPath_;
-    std::unique_ptr<media::SequentialFrameReader> reader_;
+    std::map<std::filesystem::path, std::unique_ptr<media::SequentialFrameReader>> readers_;
 };
 
 } // namespace velocity::ui

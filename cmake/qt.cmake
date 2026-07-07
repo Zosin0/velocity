@@ -9,7 +9,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 COMPONENTS Widgets REQUIRED)
+find_package(Qt6 COMPONENTS Widgets Concurrent REQUIRED)
 
 # Runs windeployqt on the output executable to copy runtime Qt DLLs and plugins.
 function(velocity_copy_qt_dlls target)

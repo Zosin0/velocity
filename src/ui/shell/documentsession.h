@@ -28,8 +28,11 @@ public:
     [[nodiscard]] std::optional<engine::ClipId> selectedClipId() const { return selectedClipId_; }
     [[nodiscard]] std::optional<size_t> selectedTrackIdx() const { return selectedTrackIdx_; }
 
-    // Mutating API (adds to UndoStack and emits snapshotChanged)
-    void importMedia(const std::filesystem::path& path, size_t trackIdx = 0);
+    // Mutating API (adds to UndoStack and emits snapshotChanged).
+    // `at` places the clip at an exact tick (drops); nullopt appends after
+    // the track's existing content.
+    void importMedia(const std::filesystem::path& path, size_t trackIdx = 0,
+                     std::optional<velocity::Tick> at = std::nullopt);
     void splitClipAtPlayhead();
     void deleteSelectedClip();
     void moveSelectedClip(velocity::Tick newStart);

@@ -11,6 +11,7 @@
 #include <QSize>
 #include <QRect>
 #include <algorithm>
+#include <vector>
 
 namespace velocity::ui {
 
@@ -81,18 +82,23 @@ static QImage convertVideoFrameToQImage(const velocity::media::VideoFrame& frame
     return img;
 }
 
-// Child widget that draws using QPainter, honoring the clip transform
-// (position/scale/rotation/opacity — docs/06 semantics, CPU preview path).
+// Child widget compositing all visible video layers bottom-to-top with each
+// clip's transform (position/scale/rotation/opacity — docs/06 semantics,
+// CPU preview path; the D3D12 render graph replaces the drawing internals
+// later without changing this contract).
 class VideoSurfaceWidget : public QWidget {
 public:
+    struct Layer {
+        QImage image;
+        velocity::engine::ClipTransform transform;
+    };
+
     explicit VideoSurfaceWidget(QWidget* parent = nullptr) : QWidget(parent) {
         setAttribute(Qt::WA_OpaquePaintEvent, true);
     }
 
-    void setImage(const QImage& img,
-                  const velocity::engine::ClipTransform& t = {}) {
-        image_ = img;
-        transform_ = t;
+    void setLayers(std::vector<Layer> layers) {
+        layers_ = std::move(layers);
         update();
     }
 
@@ -101,7 +107,7 @@ protected:
         Q_UNUSED(event);
         QPainter painter(this);
         painter.fillRect(rect(), QColor(10, 10, 10)); // letterbox background
-        if (image_.isNull()) {
+        if (layers_.empty()) {
             // Empty state: dark canvas with safe-area guides
             painter.setPen(QPen(QColor(40, 40, 40), 1, Qt::DashLine));
             painter.drawRect(rect().adjusted(20, 20, -20, -20));
@@ -113,22 +119,26 @@ protected:
         }
 
         painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-        const QSize fitSize = image_.size().scaled(size(), Qt::KeepAspectRatio);
-        const QRectF baseRect(-fitSize.width() / 2.0, -fitSize.height() / 2.0,
-                              fitSize.width(), fitSize.height());
-
-        // Normalized position offsets map to the fitted frame's dimensions.
-        painter.translate(width() / 2.0 + transform_.posX * fitSize.width(),
-                          height() / 2.0 + transform_.posY * fitSize.height());
-        painter.rotate(transform_.rotation);
-        painter.scale(transform_.scale, transform_.scale);
-        painter.setOpacity(std::clamp(transform_.opacity, 0.0f, 1.0f));
-        painter.drawImage(baseRect, image_);
+        for (const Layer& layer : layers_) {
+            if (layer.image.isNull())
+                continue;
+            painter.save();
+            const QSize fitSize = layer.image.size().scaled(size(), Qt::KeepAspectRatio);
+            const QRectF baseRect(-fitSize.width() / 2.0, -fitSize.height() / 2.0,
+                                  fitSize.width(), fitSize.height());
+            // Normalized position offsets map to the fitted frame's dimensions.
+            painter.translate(width() / 2.0 + layer.transform.posX * fitSize.width(),
+                              height() / 2.0 + layer.transform.posY * fitSize.height());
+            painter.rotate(layer.transform.rotation);
+            painter.scale(layer.transform.scale, layer.transform.scale);
+            painter.setOpacity(std::clamp(layer.transform.opacity, 0.0f, 1.0f));
+            painter.drawImage(baseRect, layer.image);
+            painter.restore();
+        }
     }
 
 private:
-    QImage image_;
-    velocity::engine::ClipTransform transform_;
+    std::vector<Layer> layers_;
 };
 
 // ------------------------------------------------------------- PreviewWidget
@@ -203,54 +213,40 @@ void PreviewWidget::paintEvent(QPaintEvent* event) {
 }
 
 void PreviewWidget::renderFrame() {
-    // 1. Resolve video sample at the playhead
+    // Composite every visible video layer at the playhead (bottom-to-top).
     auto seq = session_->currentSnapshot();
-    Tick playhead = session_->playhead();
-    auto sampleOpt = engine::resolveVideoAt(*seq, playhead);
+    const Tick playhead = session_->playhead();
 
-    if (sampleOpt) {
-        const auto& sample = sampleOpt.value();
-        // Check if we need to open a new decoder or switch assets
-        if (currentAssetPath_ != sample.asset || !reader_) {
+    std::vector<VideoSurfaceWidget::Layer> layers;
+    for (const auto& sample : engine::resolveVideoLayersAt(*seq, playhead)) {
+        auto it = readers_.find(sample.asset);
+        if (it == readers_.end()) {
             media::DecodeOptions opts;
-            opts.preferHardware = true; // Use D3D11VA hardware decode if available
+            opts.preferHardware = true; // D3D11VA when available
             auto decRes = media::VideoDecoder::open(sample.asset, opts);
-            if (decRes) {
-                reader_ = std::make_unique<media::SequentialFrameReader>(std::move(decRes.value()));
-                currentAssetPath_ = sample.asset;
-            } else {
-                reader_.reset();
-                currentAssetPath_.clear();
-            }
+            it = readers_
+                     .emplace(sample.asset,
+                              decRes ? std::make_unique<media::SequentialFrameReader>(
+                                           std::move(decRes.value()))
+                                     : nullptr)
+                     .first;
         }
+        if (!it->second)
+            continue;
 
-        if (reader_) {
-            // Sequential-locality read: rolls forward during playback,
-            // seeks only on jumps (docs/04 §2).
-            auto frameRes = reader_->at(sample.srcPts);
-            if (frameRes) {
-                QImage img = convertVideoFrameToQImage(frameRes.value());
-                if (videoSurface_) {
-                    videoSurface_->setImage(img, sample.transform);
-                }
-            } else {
-                if (videoSurface_) {
-                    videoSurface_->setImage(QImage()); // Fallback to black
-                }
-            }
-        } else {
-            if (videoSurface_) {
-                videoSurface_->setImage(QImage());
-            }
-        }
-    } else {
-        // No clip at playhead
-        if (videoSurface_) {
-            videoSurface_->setImage(QImage());
+        // Sequential-locality read: rolls forward during playback, seeks on
+        // jumps (docs/04 §2).
+        if (auto frameRes = it->second->at(sample.srcPts)) {
+            QImage img = convertVideoFrameToQImage(*frameRes);
+            if (!img.isNull())
+                layers.push_back({std::move(img), sample.transform});
         }
     }
 
-    // Call Direct3D 12 swapchain clear and present to keep GPU pipeline active
+    if (videoSurface_)
+        videoSurface_->setLayers(std::move(layers));
+
+    // Keep the D3D12 swapchain presenting behind the composite.
     if (device_ && swapchain_) {
         const float clearColor[4] = {0.07f, 0.07f, 0.07f, 1.0f};
         auto res = swapchain_->clearAndPresent(*device_, clearColor);
