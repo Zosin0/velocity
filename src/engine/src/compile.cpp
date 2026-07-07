@@ -22,11 +22,14 @@ std::optional<VideoSample> resolveVideoAt(const Sequence& seq, Tick at) {
         if ((*it)->kind != TrackKind::video)
             continue;
         if (const Clip* c = clipAt(**it, at)) {
+            if (c->hidden || c->transform.opacity <= 0.0f)
+                continue; // invisible: the track below shows through
             VideoSample s;
             s.asset = c->asset;
             s.srcPts = c->srcStartPts + ptsFromTicks(at - c->dstStart, c->srcTimebase);
             s.srcTimebase = c->srcTimebase;
             s.clip = c->id;
+            s.transform = c->transform;
             return s;
         }
     }

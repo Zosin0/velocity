@@ -299,15 +299,18 @@ void TimelineWidget::mousePressEvent(QMouseEvent* event) {
             session_->setPlayhead(xToTick(event->pos().x()));
         } else if (hit.kind == HitResult::clipBody) {
             interaction_ = InteractionState::draggingClip;
+            session_->beginGesture();
             session_->selectClip(hit.clipId, hit.trackIdx);
             dragStartClipOffset_ = hit.clip->dstStart;
         } else if (hit.kind == HitResult::clipLeftEdge) {
             interaction_ = InteractionState::trimmingHead;
+            session_->beginGesture();
             session_->selectClip(hit.clipId, hit.trackIdx);
             dragStartClipOffset_ = hit.clip->dstStart;
             dragStartClipLen_ = hit.clip->dstLen;
         } else if (hit.kind == HitResult::clipRightEdge) {
             interaction_ = InteractionState::trimmingTail;
+            session_->beginGesture();
             session_->selectClip(hit.clipId, hit.trackIdx);
             dragStartClipOffset_ = hit.clip->dstStart;
             dragStartClipLen_ = hit.clip->dstLen;
@@ -353,6 +356,11 @@ void TimelineWidget::mouseMoveEvent(QMouseEvent* event) {
 
 void TimelineWidget::mouseReleaseEvent(QMouseEvent* event) {
     Q_UNUSED(event);
+    if (interaction_ == InteractionState::draggingClip ||
+        interaction_ == InteractionState::trimmingHead ||
+        interaction_ == InteractionState::trimmingTail) {
+        session_->endGesture();
+    }
     interaction_ = InteractionState::idle;
     setCursor(Qt::ArrowCursor);
 }

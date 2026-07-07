@@ -33,8 +33,18 @@ public:
     void splitClipAtPlayhead();
     void deleteSelectedClip();
     void moveSelectedClip(velocity::Tick newStart);
+    void moveSelectedClipToTrack(size_t toTrack, velocity::Tick newStart);
     void trimSelectedClipHead(velocity::Tick newStart);
     void trimSelectedClipTail(velocity::Tick newEnd);
+    void updateSelectedClip(const std::function<void(engine::Clip&)>& mutate);
+
+    // Interactive gesture coalescing: between begin/end, edits replace the
+    // top undo entry instead of pushing — one gesture, one undo step.
+    void beginGesture();
+    void endGesture();
+
+    // Selected clip lookup in the current snapshot (nullptr if none/stale).
+    [[nodiscard]] engine::ClipPtr selectedClip() const;
 
     // Playhead / Selection controls
     void setPlayhead(velocity::Tick tick);
@@ -57,6 +67,8 @@ private:
     velocity::Tick playhead_ = 0;
     std::optional<engine::ClipId> selectedClipId_;
     std::optional<size_t> selectedTrackIdx_;
+    bool inGesture_ = false;
+    bool gestureDirty_ = false;
 };
 
 } // namespace velocity::ui

@@ -81,50 +81,54 @@ static QImage convertVideoFrameToQImage(const velocity::media::VideoFrame& frame
     return img;
 }
 
-// Child widget that draws using QPainter
+// Child widget that draws using QPainter, honoring the clip transform
+// (position/scale/rotation/opacity — docs/06 semantics, CPU preview path).
 class VideoSurfaceWidget : public QWidget {
 public:
     explicit VideoSurfaceWidget(QWidget* parent = nullptr) : QWidget(parent) {
         setAttribute(Qt::WA_OpaquePaintEvent, true);
     }
-    
-    void setImage(const QImage& img) {
+
+    void setImage(const QImage& img,
+                  const velocity::engine::ClipTransform& t = {}) {
         image_ = img;
+        transform_ = t;
         update();
     }
-    
+
 protected:
     void paintEvent(QPaintEvent* event) override {
         Q_UNUSED(event);
         QPainter painter(this);
+        painter.fillRect(rect(), QColor(10, 10, 10)); // letterbox background
         if (image_.isNull()) {
-            // Draw default dark background
-            painter.fillRect(rect(), QColor(18, 18, 18));
-            
-            // Draw visual guidelines / safe area
+            // Empty state: dark canvas with safe-area guides
             painter.setPen(QPen(QColor(40, 40, 40), 1, Qt::DashLine));
             painter.drawRect(rect().adjusted(20, 20, -20, -20));
-            
-            // Draw center crosshairs
             painter.drawLine(width() / 2 - 10, height() / 2, width() / 2 + 10, height() / 2);
             painter.drawLine(width() / 2, height() / 2 - 10, width() / 2, height() / 2 + 10);
-            
             painter.setPen(QColor(100, 100, 100));
             painter.drawText(rect(), Qt::AlignCenter, "No Active Clip at Playhead");
-        } else {
-            painter.fillRect(rect(), QColor(10, 10, 10)); // black letterboxes/pillarboxes
-            QSize imgSize = image_.size();
-            QSize fitSize = imgSize.scaled(size(), Qt::KeepAspectRatio);
-            QRect targetRect((width() - fitSize.width()) / 2,
-                             (height() - fitSize.height()) / 2,
-                             fitSize.width(),
-                             fitSize.height());
-            painter.drawImage(targetRect, image_);
+            return;
         }
+
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        const QSize fitSize = image_.size().scaled(size(), Qt::KeepAspectRatio);
+        const QRectF baseRect(-fitSize.width() / 2.0, -fitSize.height() / 2.0,
+                              fitSize.width(), fitSize.height());
+
+        // Normalized position offsets map to the fitted frame's dimensions.
+        painter.translate(width() / 2.0 + transform_.posX * fitSize.width(),
+                          height() / 2.0 + transform_.posY * fitSize.height());
+        painter.rotate(transform_.rotation);
+        painter.scale(transform_.scale, transform_.scale);
+        painter.setOpacity(std::clamp(transform_.opacity, 0.0f, 1.0f));
+        painter.drawImage(baseRect, image_);
     }
-    
+
 private:
     QImage image_;
+    velocity::engine::ClipTransform transform_;
 };
 
 // ------------------------------------------------------------- PreviewWidget
@@ -227,7 +231,7 @@ void PreviewWidget::renderFrame() {
             if (frameRes) {
                 QImage img = convertVideoFrameToQImage(frameRes.value());
                 if (videoSurface_) {
-                    videoSurface_->setImage(img);
+                    videoSurface_->setImage(img, sample.transform);
                 }
             } else {
                 if (videoSurface_) {

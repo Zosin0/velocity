@@ -15,6 +15,7 @@ struct VideoSample {
     std::int64_t srcPts = 0; // exact source pts to display, stream timebase
     Rational srcTimebase{1, kTickRate};
     ClipId clip = 0;
+    ClipTransform transform; // static transform to apply when compositing
 };
 
 // Topmost video-track clip covering `at`; nullopt = black/silence gap.

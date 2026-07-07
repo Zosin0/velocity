@@ -28,11 +28,54 @@ bool DocumentSession::canRedo() const {
 
 void DocumentSession::updateSnapshot(engine::EditResult&& result) {
     if (result) {
-        undoStack_->push(result.value());
+        if (inGesture_ && gestureDirty_)
+            undoStack_->replaceTop(result.value());
+        else
+            undoStack_->push(result.value());
+        gestureDirty_ = inGesture_;
         emit snapshotChanged(undoStack_->current());
     } else {
         emit errorOccurred(QString::fromStdString(result.error()));
     }
+}
+
+void DocumentSession::beginGesture() {
+    inGesture_ = true;
+    gestureDirty_ = false;
+}
+
+void DocumentSession::endGesture() {
+    inGesture_ = false;
+    gestureDirty_ = false;
+}
+
+engine::ClipPtr DocumentSession::selectedClip() const {
+    if (!selectedClipId_ || !selectedTrackIdx_)
+        return nullptr;
+    auto seq = currentSnapshot();
+    if (*selectedTrackIdx_ >= seq->tracks.size())
+        return nullptr;
+    for (const auto& c : seq->tracks[*selectedTrackIdx_]->clips)
+        if (c->id == *selectedClipId_)
+            return c;
+    return nullptr;
+}
+
+void DocumentSession::updateSelectedClip(const std::function<void(engine::Clip&)>& mutate) {
+    if (!selectedClipId_ || !selectedTrackIdx_)
+        return;
+    auto res = engine::updateClip(currentSnapshot(), *selectedTrackIdx_, *selectedClipId_, mutate);
+    updateSnapshot(std::move(res));
+}
+
+void DocumentSession::moveSelectedClipToTrack(size_t toTrack, velocity::Tick newStart) {
+    if (!selectedClipId_ || !selectedTrackIdx_)
+        return;
+    auto res = engine::moveClipToTrack(currentSnapshot(), *selectedTrackIdx_, *selectedClipId_,
+                                       toTrack, newStart);
+    if (res)
+        selectedTrackIdx_ = toTrack;
+    updateSnapshot(std::move(res));
 }
 
 void DocumentSession::importMedia(const std::filesystem::path& path, size_t trackIdx) {

@@ -150,6 +150,27 @@ TEST(Compile, ResolvesTopTrackAndExactSourcePts) {
     EXPECT_FALSE(resolveVideoAt(**s, 5 * kSec).has_value());
 }
 
+TEST(Compile, HiddenClipsFallThroughToLowerTracks) {
+    auto seq = makeSequence(1920, 1080, {30, 1}, 2, 0);
+    auto s = addClip(seq, 0, makeClip("base.mp4", 0, 2 * kSec));
+    s = addClip(*s, 1, makeClip("overlay.mp4", 0, 2 * kSec));
+    ASSERT_TRUE(s.hasValue());
+    const ClipId overlayId = (*s)->tracks[1]->clips[0]->id;
+
+    // Overlay wins while visible.
+    EXPECT_EQ(resolveVideoAt(**s, kSec)->asset, "overlay.mp4");
+
+    // Hidden overlay: base shows through.
+    auto hidden = updateClip(*s, 1, overlayId, [](Clip& c) { c.hidden = true; });
+    ASSERT_TRUE(hidden.hasValue());
+    EXPECT_EQ(resolveVideoAt(**hidden, kSec)->asset, "base.mp4");
+
+    // Zero opacity behaves like hidden.
+    auto transparent = updateClip(*s, 1, overlayId, [](Clip& c) { c.transform.opacity = 0.0f; });
+    ASSERT_TRUE(transparent.hasValue());
+    EXPECT_EQ(resolveVideoAt(**transparent, kSec)->asset, "base.mp4");
+}
+
 TEST(Compile, AudioSegmentsClippedToRange) {
     auto seq = makeSequence(1920, 1080, {30, 1}, 0, 2);
     auto s = addClip(seq, 0, makeClip("voice.wav", 0, 3 * kSec, 0, {1, 48000}));

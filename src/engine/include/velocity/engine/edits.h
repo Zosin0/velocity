@@ -63,6 +63,16 @@ public:
         states_.push_back(std::move(next));
         ++index_;
     }
+    // Replaces the newest state in place: used by interactive gestures
+    // (drag/trim/slider) so one gesture == one undo entry (docs/02 §5).
+    void replaceTop(SnapshotPtr next) {
+        if (index_ == 0) {
+            push(std::move(next));
+            return;
+        }
+        states_.resize(index_ + 1);
+        states_[index_] = std::move(next);
+    }
     const SnapshotPtr& undo() {
         if (canUndo())
             --index_;
