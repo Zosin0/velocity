@@ -10,6 +10,10 @@
 #include "../playback/playback_controller.h"
 #include "theming.h"
 
+#include <velocity/engine/project_io.h>
+
+#include <QFileInfo>
+
 #include <QDockWidget>
 #include <QMenuBar>
 #include <QToolBar>
@@ -53,16 +57,15 @@ MainWindow::MainWindow(QWidget* parent)
     });
 
     connect(session_, &DocumentSession::snapshotChanged, this, [this](const engine::SnapshotPtr&) {
+        dirty_ = true;
         updateTitle();
     });
 }
 
 void MainWindow::updateTitle() {
-    QString title = "Velocity Video Editor [Unsaved Project] - C++20 / Direct3D 12";
-    if (session_) {
-        title += QString(" (%1 tracks)").arg(session_->currentSnapshot()->tracks.size());
-    }
-    setWindowTitle(title);
+    const QString name = projectPath_.isEmpty() ? "Untitled Project"
+                                                : QFileInfo(projectPath_).completeBaseName();
+    setWindowTitle(QString("%1%2 — Velocity").arg(name, dirty_ ? "*" : ""));
 }
 
 void MainWindow::setupMenus() {
@@ -77,6 +80,9 @@ void MainWindow::setupMenus() {
 
     auto* saveAct = projectMenu->addAction("&Save Project", this, &MainWindow::onSaveProject);
     saveAct->setShortcut(QKeySequence::Save);
+
+    auto* saveAsAct = projectMenu->addAction("Save Project &As…", this, &MainWindow::onSaveProjectAs);
+    saveAsAct->setShortcut(QKeySequence::SaveAs);
 
     projectMenu->addSeparator();
     
@@ -325,23 +331,88 @@ void MainWindow::onNewProject() {
 
         // Trigger updates
         session_->setPlayhead(0);
+        projectPath_.clear();
+        dirty_ = false;
         updateTitle();
-        QMessageBox::information(this, "New Project", "New 1080p Sequence created successfully.");
+        statusBar()->showMessage("New 1080p sequence created.", 5000);
     }
 }
 
 void MainWindow::onOpenProject() {
-    QString file = QFileDialog::getOpenFileName(this, "Open Velocity Project", "", "Velocity Projects (*.db)");
-    if (!file.isEmpty()) {
-        QMessageBox::information(this, "Open Project", "Project database loaded successfully.");
+    if (dirty_) {
+        const auto answer = QMessageBox::question(
+            this, "Open Project", "Discard unsaved changes in the current project?",
+            QMessageBox::Yes | QMessageBox::No);
+        if (answer != QMessageBox::Yes)
+            return;
     }
+
+    const QString file = QFileDialog::getOpenFileName(this, "Open Velocity Project", QString(),
+                                                      "Velocity Projects (*.velproj)");
+    if (file.isEmpty())
+        return;
+
+    playback_->pause();
+    auto loaded = engine::loadProject(std::filesystem::path(file.toStdWString()));
+    if (!loaded) {
+        QMessageBox::critical(this, "Open Project",
+                              QString::fromStdString(loaded.error()));
+        return;
+    }
+
+    // Warn (but proceed) when referenced media is missing — clips stay
+    // editable as offline placeholders (docs/03 §4).
+    QStringList missing;
+    for (const auto& track : (*loaded)->tracks)
+        for (const auto& clip : track->clips)
+            if (!std::filesystem::exists(clip->asset))
+                missing << QFileInfo(QString::fromStdWString(clip->asset.wstring())).fileName();
+    missing.removeDuplicates();
+    if (!missing.isEmpty()) {
+        QMessageBox::warning(this, "Missing Media",
+                             "These files were not found and will play as black/silence:\n" +
+                                 missing.join('\n'));
+    }
+
+    session_->replaceDocument(std::move(loaded.value()));
+    projectPath_ = file;
+    dirty_ = false;
+    updateTitle();
+    statusBar()->showMessage("Project loaded: " + QFileInfo(file).fileName(), 5000);
+}
+
+bool MainWindow::saveTo(const QString& path) {
+    auto result = engine::saveProject(session_->currentSnapshot(),
+                                      std::filesystem::path(path.toStdWString()));
+    if (!result) {
+        QMessageBox::critical(this, "Save Project", QString::fromStdString(result.error()));
+        return false;
+    }
+    projectPath_ = path;
+    dirty_ = false;
+    updateTitle();
+    statusBar()->showMessage("Project saved: " + QFileInfo(path).fileName(), 5000);
+    return true;
 }
 
 void MainWindow::onSaveProject() {
-    QString file = QFileDialog::getSaveFileName(this, "Save Velocity Project", "", "Velocity Projects (*.db)");
-    if (!file.isEmpty()) {
-        QMessageBox::information(this, "Save Project", "Project database saved successfully.");
+    if (projectPath_.isEmpty()) {
+        onSaveProjectAs();
+        return;
     }
+    saveTo(projectPath_);
+}
+
+void MainWindow::onSaveProjectAs() {
+    QString file = QFileDialog::getSaveFileName(this, "Save Velocity Project",
+                                                projectPath_.isEmpty() ? "untitled.velproj"
+                                                                       : projectPath_,
+                                                "Velocity Projects (*.velproj)");
+    if (file.isEmpty())
+        return;
+    if (!file.endsWith(".velproj", Qt::CaseInsensitive))
+        file += ".velproj";
+    saveTo(file);
 }
 
 void MainWindow::onExportVideo() {

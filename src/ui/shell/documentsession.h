@@ -57,6 +57,10 @@ public:
     void undo();
     void redo();
 
+    // Replaces the whole document (project open): fresh undo history,
+    // cleared selection, playhead at 0.
+    void replaceDocument(engine::SnapshotPtr snapshot);
+
 signals:
     void snapshotChanged(const velocity::engine::SnapshotPtr& snapshot);
     void playheadChanged(velocity::Tick tick);

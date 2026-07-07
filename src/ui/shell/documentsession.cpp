@@ -269,6 +269,18 @@ void DocumentSession::selectClip(std::optional<engine::ClipId> clipId, std::opti
     }
 }
 
+void DocumentSession::replaceDocument(engine::SnapshotPtr snapshot) {
+    undoStack_ = std::make_unique<engine::UndoStack>(std::move(snapshot));
+    selectedClipId_ = std::nullopt;
+    selectedTrackIdx_ = std::nullopt;
+    playhead_ = 0;
+    inGesture_ = false;
+    gestureDirty_ = false;
+    emit selectionChanged(std::nullopt);
+    emit playheadChanged(0);
+    emit snapshotChanged(undoStack_->current());
+}
+
 void DocumentSession::undo() {
     if (undoStack_->canUndo()) {
         undoStack_->undo();

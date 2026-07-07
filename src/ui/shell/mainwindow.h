@@ -27,6 +27,7 @@ private slots:
     void onNewProject();
     void onOpenProject();
     void onSaveProject();
+    void onSaveProjectAs();
     void onExportVideo();
     void onStepForward();
     void onStepBackward();
@@ -53,6 +54,11 @@ private:
     // Actions
     QAction* playPauseAction_;
     QAction* loopAction_;
+
+    // Project file state
+    QString projectPath_;
+    bool dirty_ = false;
+    bool saveTo(const QString& path);
 };
 
 } // namespace velocity::ui
