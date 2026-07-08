@@ -37,9 +37,11 @@ PlaybackController::PlaybackController(DocumentSession* session, QObject* parent
         spdlog::warn("no audio endpoint: playback will run on a wall clock ({})", out.error());
     }
 
-    // Edits during playback: adopt the new snapshot at the next feed chunk.
+    // Edits during playback: pause to prevent state inconsistency and background seek overload.
     connect(session_, &DocumentSession::snapshotChanged, this,
             [this](const engine::SnapshotPtr& snap) {
+                if (playing_)
+                    pause();
                 std::lock_guard lock(seqMutex_);
                 playSeq_ = snap;
                 timelineDuration_ = snap->duration();
@@ -80,8 +82,6 @@ void PlaybackController::play() {
 
     wallClock_.start();
     if (output_) {
-        if (auto c = output_->clock())
-            clockStartSeconds_ = c->positionSeconds;
         const std::uint32_t deviceRate = output_->sampleRate();
         const std::uint32_t channels = output_->channels();
         auto started = output_->start([this, deviceRate, channels](float* buf,
@@ -112,8 +112,12 @@ void PlaybackController::play() {
             ringRead_.store(rd + std::min<std::uint64_t>(consumed, avail),
                             std::memory_order_release);
         });
-        if (!started)
+        if (!started) {
             spdlog::warn("audio start failed: {}", started.error());
+        } else {
+            if (auto c = output_->clock())
+                clockStartSeconds_ = c->positionSeconds;
+        }
     }
 
     playing_ = true;

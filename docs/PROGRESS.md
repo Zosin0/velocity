@@ -3,12 +3,12 @@
 > Read this FIRST at the start of every session. Re-verify build + tests
 > before writing new code. Update this file before ending every session.
 
-## Current state (last verified: 2026-07-07, session 3)
+## Current state (last verified: 2026-07-07, session 4)
 
 - **Phase:** Phase 3 (functional MVP build-out) **IN PROGRESS** — core editing
   workflow is real end-to-end; see "Milestone status" below.
 - **Build:** `dev` preset clean (MSVC 14.44, /W4 /WX, zero warnings).
-- **Tests:** **45/45** pass via `ctest --preset dev`.
+- **Tests:** **63/63** pass via `ctest --preset dev`.
 - **App:** launches, edits, plays with audio, saves/loads projects, exports
   verified MP4s. Smoke-tested after every unit this session.
 
@@ -132,5 +132,13 @@ cmake --preset dev && cmake --build --preset dev && ctest --preset dev
   Real waveforms (background peaks, cached); native drag & drop everywhere;
   magnet snapping; cross-track drags; bin search + metadata. Project
   save/load (.velproj JSON) with dirty tracking and missing-media handling.
-  Preview now renders RGBA/RGB24/YUVJ420 sources (images). 45/45 tests.
+  Preview now renders RGBA/RGB24/YUVJ420 sources (images). 63/63 tests.
   Commits: 8b1e138, 9e1c052, f62c99c, 1b42438, 2e6b405, b7e726f + this one.
+- **2026-07-07 (session 4):** Debug session. Fixed audio clock baseline capture
+  (`clockStartSeconds_` captured after device `start()`), solving the issue
+  where playhead/timeline would freeze/clamp to 0 on play-after-pause. Added
+  automatic playback pausing when any snapshot change (edit) occurs, which keeps
+  the audio/video decoders, feeder thread, and UI thread perfectly synchronized
+  and prevents playback/timeline freezes. Cleaned up Unicode encoding corruptions in
+  `mainwindow.cpp` and fixed the play/pause button state detection logic checking
+  `contains("Pause")` instead of `== "Pause"`.

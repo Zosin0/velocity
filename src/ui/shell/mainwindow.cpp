@@ -1,4 +1,4 @@
-﻿#include "mainwindow.h"
+#include "mainwindow.h"
 #include "documentsession.h"
 #include <spdlog/spdlog.h>
 #include "../bin/media_bin_widget.h"
@@ -54,7 +54,7 @@ MainWindow::MainWindow(QWidget* parent)
     // 4. Wire playback state into the UI
     mixer_->attachPlayback(playback_);
     connect(playback_, &PlaybackController::playStateChanged, this, [this](bool playing) {
-        playPauseAction_->setText(playing ? "â¸ Pause" : "â–¶ Play");
+        playPauseAction_->setText(playing ? "⏸ Pause" : "▶ Play");
     });
 
     connect(session_, &DocumentSession::snapshotChanged, this, [this](const engine::SnapshotPtr&) {
@@ -66,7 +66,7 @@ MainWindow::MainWindow(QWidget* parent)
 void MainWindow::updateTitle() {
     const QString name = projectPath_.isEmpty() ? "Untitled Project"
                                                 : QFileInfo(projectPath_).completeBaseName();
-    setWindowTitle(QString("%1%2 â€” Velocity").arg(name, dirty_ ? "*" : ""));
+    setWindowTitle(QString("%1%2 — Velocity").arg(name, dirty_ ? "*" : ""));
 }
 
 void MainWindow::setupMenus() {
@@ -82,7 +82,7 @@ void MainWindow::setupMenus() {
     auto* saveAct = projectMenu->addAction("&Save Project", this, &MainWindow::onSaveProject);
     saveAct->setShortcut(QKeySequence::Save);
 
-    auto* saveAsAct = projectMenu->addAction("Save Project &Asâ€¦", this, &MainWindow::onSaveProjectAs);
+    auto* saveAsAct = projectMenu->addAction("Save Project &As…", this, &MainWindow::onSaveProjectAs);
     saveAsAct->setShortcut(QKeySequence::SaveAs);
 
     projectMenu->addSeparator();
@@ -216,7 +216,7 @@ void MainWindow::setupDocks() {
     connect(playBtn, &QPushButton::clicked, playPauseAction_, &QAction::trigger);
     connect(playPauseAction_, &QAction::changed, this, [playBtn, this]() {
         playBtn->setIcon(
-            icons::icon(playPauseAction_->text() == "Pause" ? "pause" : "play"));
+            icons::icon(playPauseAction_->text().contains("Pause") ? "pause" : "play"));
     });
     connect(playPauseAction_, &QAction::triggered, this,
             [this]() { playback_->togglePlayPause(); });
@@ -299,7 +299,7 @@ void MainWindow::setupStatusBar() {
     auto* fpsLabel = new QLabel("FPS: 30.00 |", this);
     bar->addPermanentWidget(fpsLabel);
 
-    auto* resLabel = new QLabel("Format: 1920Ã—1080 |", this);
+    auto* resLabel = new QLabel("Format: 1920×1080 |", this);
     bar->addPermanentWidget(resLabel);
 
     auto* hardwareLabel = new QLabel("Engine: Direct3D 12 (DirectX Hardware Acceleration) |", this);
@@ -321,7 +321,7 @@ void MainWindow::onNewProject() {
         connect(session_, &DocumentSession::errorOccurred, this, &MainWindow::onShowError);
         playback_ = new PlaybackController(session_, this);
         connect(playback_, &PlaybackController::playStateChanged, this, [this](bool playing) {
-            playPauseAction_->setText(playing ? "â¸ Pause" : "â–¶ Play");
+            playPauseAction_->setText(playing ? "⏸ Pause" : "▶ Play");
         });
         
         // Re-inject session pointers
@@ -388,8 +388,8 @@ void MainWindow::onOpenProject() {
         return;
     }
 
-    // Warn (but proceed) when referenced media is missing â€” clips stay
-    // editable as offline placeholders (docs/03 Â§4).
+    // Warn (but proceed) when referenced media is missing — clips stay
+    // editable as offline placeholders (docs/03 §4).
     QStringList missing;
     for (const auto& track : (*loaded)->tracks)
         for (const auto& clip : track->clips)
