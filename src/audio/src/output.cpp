@@ -147,13 +147,22 @@ Expected<void, std::string> AudioOutput::start(FillCallback fillCb) {
     Impl& im = *impl_;
     im.fill = std::move(fillCb);
 
-    // Pre-fill the whole buffer so playback starts without an underrun.
-    BYTE* buf = nullptr;
-    HRESULT hr = im.render->GetBuffer(im.bufferFrames, &buf);
+    // Pre-fill the free portion of the buffer so playback starts without an
+    // underrun. After a stop()/Reset() this is the whole buffer, but query
+    // the padding anyway — assuming an empty buffer made restarts fail with
+    // AUDCLNT_E_BUFFER_TOO_LARGE (the play-after-edit freeze).
+    UINT32 padding = 0;
+    HRESULT hr = im.client->GetCurrentPadding(&padding);
     if (FAILED(hr))
-        return makeUnexpected(hrText("prefill GetBuffer", hr));
-    im.fill(reinterpret_cast<float*>(buf), im.bufferFrames);
-    im.render->ReleaseBuffer(im.bufferFrames, 0);
+        return makeUnexpected(hrText("prefill GetCurrentPadding", hr));
+    const UINT32 prefill = im.bufferFrames - padding;
+    if (prefill > 0) {
+        BYTE* buf = nullptr;
+        if (FAILED(hr = im.render->GetBuffer(prefill, &buf)))
+            return makeUnexpected(hrText("prefill GetBuffer", hr));
+        im.fill(reinterpret_cast<float*>(buf), prefill);
+        im.render->ReleaseBuffer(prefill, 0);
+    }
 
     im.running.store(true, std::memory_order_release);
     im.renderThread = std::thread([this] { impl_->renderLoop(); });
@@ -171,8 +180,12 @@ void AudioOutput::stop() {
         return;
     if (im.renderThread.joinable())
         im.renderThread.join();
-    if (im.client)
+    if (im.client) {
         im.client->Stop();
+        // Flush queued frames and rewind the stream/clock so the next
+        // start() begins from a clean, fully writable buffer.
+        im.client->Reset();
+    }
 }
 
 std::uint32_t AudioOutput::sampleRate() const { return impl_->rate; }

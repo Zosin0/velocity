@@ -9,6 +9,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 
@@ -65,4 +66,29 @@ TEST(Audio, OutputOpensPlaysAndClockAdvances) {
     EXPECT_LE(underruns, 2u) << "audio underruns during steady playback";
 
     (*out)->stop();
+}
+
+// Regression for the play-after-edit freeze: an output must start again
+// after stop(). Without Reset() in stop(), the second start()'s prefill hit
+// a non-empty device buffer (AUDCLNT_E_BUFFER_TOO_LARGE) and failed, leaving
+// the playback clock frozen.
+TEST(Audio, OutputRestartsAfterStop) {
+    auto out = AudioOutput::create();
+    if (!out)
+        GTEST_SKIP() << "no usable audio endpoint: " << out.error();
+
+    const std::uint32_t channels = (*out)->channels();
+    auto fill = [channels](float* buf, std::uint32_t frames) {
+        std::fill(buf, buf + static_cast<size_t>(frames) * channels, 0.0f);
+    };
+
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        auto started = (*out)->start(fill);
+        ASSERT_TRUE(started.hasValue())
+            << "start cycle " << cycle << " failed: " << started.error();
+        Sleep(80);
+        auto c = (*out)->clock();
+        ASSERT_TRUE(c.hasValue()) << c.error();
+        (*out)->stop();
+    }
 }

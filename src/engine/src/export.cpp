@@ -31,22 +31,34 @@ struct AssetReader {
     std::int64_t rgbaPts = -1;
     media::RgbaImage rgba;
 
-    const media::RgbaImage* rgbaAt(std::int64_t pts) {
+    std::optional<media::VideoFrame> frameAt(std::int64_t pts) {
         if (!reader)
-            return nullptr;
+            return std::nullopt;
         auto frame = reader->at(pts);
         if (!frame)
-            return nullptr;
-        if (frame->pts() == rgbaPts && !rgba.empty())
+            return std::nullopt;
+        return *frame;
+    }
+
+    const media::RgbaImage* rgbaFor(const media::VideoFrame& frame) {
+        if (frame.pts() == rgbaPts && !rgba.empty())
             return &rgba;
-        auto converted = converter.convert(*frame);
+        auto converted = converter.convert(frame);
         if (!converted)
             return nullptr;
         rgba = std::move(converted.value());
-        rgbaPts = frame->pts();
+        rgbaPts = frame.pts();
         return &rgba;
     }
 };
+
+// Decode outputs that carry no alpha and can skip the composite path.
+// Whitelist (not a blacklist) so unknown formats always take the correct
+// slow path. Values are AVPixelFormat: yuv420p, rgb24, yuvj420p, nv12, nv21.
+bool opaquePixelFormat(int avFormat) {
+    return avFormat == 0 || avFormat == 2 || avFormat == 12 || avFormat == 23 ||
+           avFormat == 24;
+}
 
 } // namespace
 
@@ -105,34 +117,62 @@ exportSequence(const SnapshotPtr& seq, const std::filesystem::path& outFile,
     };
 
     std::vector<CompositorLayer> layers;
+    CompositeCanvas canvas; // reused across frames (no per-frame allocation)
     for (std::int64_t f = 0; f < totalFrames; ++f) {
         const Tick tick = ticksFromFrameIndex(f, fmt.fps);
 
         // Gaps render as black; every visible layer composites with its
         // transform — exactly what the preview shows (docs/10 §1 identity).
-        layers.clear();
-        for (const auto& sample : resolveVideoLayersAt(*seq, tick)) {
-            const media::RgbaImage* rgba = readerFor(sample.asset).rgbaAt(sample.srcPts);
-            if (!rgba)
-                continue; // missing/offline media: layer drops out (slate later)
-            CompositorLayer layer;
-            layer.rgba = rgba->pixels.data();
-            layer.width = rgba->width;
-            layer.height = rgba->height;
-            layer.strideBytes = rgba->stride();
-            layer.transform = sample.transform;
-            layers.push_back(layer);
+        const auto samples = resolveVideoLayersAt(*seq, tick);
+
+        // Fast path (the plain-cuts common case): one full-opacity layer,
+        // identity transform, no alpha, same aspect as the canvas — the
+        // decoded frame goes straight to the encoder. Stretch == aspect-fit
+        // when aspects match, so the output is pixel-identical to the
+        // composite path minus its RGBA round trip and CPU blend.
+        bool wrote = false;
+        if (samples.size() == 1 && samples[0].transform.isIdentity()) {
+            if (auto frame = readerFor(samples[0].asset).frameAt(samples[0].srcPts)) {
+                const bool sameAspect =
+                    static_cast<std::int64_t>(frame->width()) * fmt.height ==
+                    static_cast<std::int64_t>(frame->height()) * fmt.width;
+                if (sameAspect && opaquePixelFormat(frame->pixelFormatInt())) {
+                    if (auto w = (*writer)->writeVideoFrame(*frame); !w)
+                        return makeUnexpected("video write failed: " + w.error().message);
+                    wrote = true;
+                }
+            }
         }
 
-        if (layers.empty()) {
-            if (auto w = (*writer)->writeBlackFrame(); !w)
-                return makeUnexpected("video write failed: " + w.error().message);
-        } else {
-            const CompositeCanvas canvas = compositeLayers(fmt.width, fmt.height, layers);
-            if (auto w = (*writer)->writeRgbaFrame(canvas.pixels.data(), canvas.width,
-                                                   canvas.height, canvas.stride());
-                !w)
-                return makeUnexpected("video write failed: " + w.error().message);
+        if (!wrote) {
+            layers.clear();
+            for (const auto& sample : samples) {
+                AssetReader& reader = readerFor(sample.asset);
+                auto frame = reader.frameAt(sample.srcPts);
+                if (!frame)
+                    continue; // missing/offline media: layer drops out (slate later)
+                const media::RgbaImage* rgba = reader.rgbaFor(*frame);
+                if (!rgba)
+                    continue;
+                CompositorLayer layer;
+                layer.rgba = rgba->pixels.data();
+                layer.width = rgba->width;
+                layer.height = rgba->height;
+                layer.strideBytes = rgba->stride();
+                layer.transform = sample.transform;
+                layers.push_back(layer);
+            }
+
+            if (layers.empty()) {
+                if (auto w = (*writer)->writeBlackFrame(); !w)
+                    return makeUnexpected("video write failed: " + w.error().message);
+            } else {
+                compositeLayersInto(canvas, fmt.width, fmt.height, layers);
+                if (auto w = (*writer)->writeRgbaFrame(canvas.pixels.data(), canvas.width,
+                                                       canvas.height, canvas.stride());
+                    !w)
+                    return makeUnexpected("video write failed: " + w.error().message);
+            }
         }
 
         // Keep audio interleaved with video: write up to the next frame edge.

@@ -79,6 +79,7 @@ private:
 
     bool playing_ = false;
     bool loop_ = false;
+    bool audioClockActive_ = false; // false → wall clock is the master
     Tick playStartTick_ = 0;
     double clockStartSeconds_ = 0.0; // IAudioClock position when play() ran
     QElapsedTimer wallClock_;        // fallback when no audio endpoint exists
