@@ -58,13 +58,40 @@ jobs:
           ./build/release/bin/velocity.exe --smoke
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
+      - name: Debug build output
+        shell: powershell
+        run: |
+          Write-Host "Current directory:"
+          Get-Location
+
+          Write-Host "`nBuild directory:"
+          if (Test-Path build) {
+            Get-ChildItem build -Recurse
+          } else {
+            Write-Host "build directory does not exist"
+          }
+
       - name: Package portable app
         shell: powershell
         run: |
-          # bin/ already contains velocity.exe + Qt runtime (windeployqt
-          # post-build) + FFmpeg DLLs — a self-contained, runnable folder.
-          Compress-Archive -Path build/release/bin/* -DestinationPath velocity-windows-x64.zip
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $BinDir = "build/release/bin"
+
+          if (!(Test-Path $BinDir)) {
+            Write-Error "$BinDir not found."
+            exit 1
+          }
+
+          $Files = Get-ChildItem $BinDir
+
+          if ($Files.Count -eq 0) {
+            Write-Error "$BinDir is empty."
+            exit 1
+          }
+
+          Compress-Archive `
+            -Path "$BinDir\*" `
+            -DestinationPath velocity-windows-x64.zip `
+            -Force
 
       - name: Upload portable app artifact
         uses: actions/upload-artifact@v4
