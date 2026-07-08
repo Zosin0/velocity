@@ -49,6 +49,12 @@ inline void samplePremul(const std::uint8_t* rgba, int w, int h, int stride, dou
 CompositeCanvas compositeLayers(int canvasWidth, int canvasHeight,
                                 const std::vector<CompositorLayer>& layers) {
     CompositeCanvas canvas;
+    compositeLayersInto(canvas, canvasWidth, canvasHeight, layers);
+    return canvas;
+}
+
+void compositeLayersInto(CompositeCanvas& canvas, int canvasWidth, int canvasHeight,
+                         const std::vector<CompositorLayer>& layers) {
     canvas.width = std::max(canvasWidth, 1);
     canvas.height = std::max(canvasHeight, 1);
     canvas.pixels.assign(static_cast<size_t>(canvas.width) * canvas.height * 4, 0);
@@ -130,7 +136,6 @@ CompositeCanvas compositeLayers(int canvasWidth, int canvasHeight,
             }
         }
     }
-    return canvas;
 }
 
 } // namespace velocity::engine

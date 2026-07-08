@@ -20,13 +20,17 @@ public:
 
     Expected<VideoFrame, MediaError> at(std::int64_t pts) {
         const Rational tb = decoder_->stream().timebase;
+        // Cache hit: the requested pts is still inside the last frame's
+        // display interval. Sub-frame playhead updates (60 Hz UI over 30 fps
+        // media) must not decode — or worse, return — the next frame early.
+        if (lastFrame_ && lastPts_ >= 0 && pts >= lastPts_ &&
+            (pts == lastPts_ || (lastDur_ > 0 && pts < lastPts_ + lastDur_)))
+            return *lastFrame_;
         // "Near" = at most 2 seconds ahead of the last delivered frame.
         // (isNear, not near: <windows.h> defines near/far as macros.)
         const bool isNear = lastPts_ >= 0 && pts >= lastPts_ &&
                             velocity::detail::cmpMul128(pts - lastPts_, tb.num, 2, tb.den) < 0;
         if (isNear) {
-            if (pts == lastPts_ && lastFrame_)
-                return *lastFrame_;
             for (int guard = 0; guard < 600; ++guard) {
                 auto f = decoder_->readNext();
                 if (!f) {
@@ -50,11 +54,13 @@ public:
 private:
     void remember(const VideoFrame& f) {
         lastPts_ = f.pts();
+        lastDur_ = std::max<std::int64_t>(f.duration(), 0);
         lastFrame_ = f;
     }
 
     std::unique_ptr<VideoDecoder> decoder_;
     std::int64_t lastPts_ = -1;
+    std::int64_t lastDur_ = 0;
     std::optional<VideoFrame> lastFrame_;
 };
 

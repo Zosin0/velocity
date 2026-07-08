@@ -35,4 +35,9 @@ struct CompositeCanvas {
 CompositeCanvas compositeLayers(int canvasWidth, int canvasHeight,
                                 const std::vector<CompositorLayer>& layers);
 
+// Same, reusing the caller's canvas storage — export calls this per frame
+// and must not reallocate a full-frame buffer 30 times a second.
+void compositeLayersInto(CompositeCanvas& canvas, int canvasWidth, int canvasHeight,
+                         const std::vector<CompositorLayer>& layers);
+
 } // namespace velocity::engine

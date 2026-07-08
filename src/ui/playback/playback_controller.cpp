@@ -77,10 +77,15 @@ void PlaybackController::play() {
     peakL_.store(0.0f);
     peakR_.store(0.0f);
 
+    // The feeder can exit on its own (empty snapshot); a joinable thread
+    // object must be joined before it is replaced or std::thread terminates.
+    if (feeder_.joinable())
+        feeder_.join();
     feederRun_.store(true);
     feeder_ = std::thread([this] { feederLoop(); });
 
     wallClock_.start();
+    audioClockActive_ = false;
     if (output_) {
         const std::uint32_t deviceRate = output_->sampleRate();
         const std::uint32_t channels = output_->channels();
@@ -113,10 +118,12 @@ void PlaybackController::play() {
                             std::memory_order_release);
         });
         if (!started) {
-            spdlog::warn("audio start failed: {}", started.error());
-        } else {
-            if (auto c = output_->clock())
-                clockStartSeconds_ = c->positionSeconds;
+            // Playback must never freeze because audio failed: the wall
+            // clock takes over as master (docs/05 §2 fallback rule).
+            spdlog::warn("audio start failed, using wall clock: {}", started.error());
+        } else if (auto c = output_->clock()) {
+            clockStartSeconds_ = c->positionSeconds;
+            audioClockActive_ = true;
         }
     }
 
@@ -218,14 +225,16 @@ void PlaybackController::onUiTick() {
         return;
 
     Tick elapsed = 0;
-    if (output_) {
+    bool haveClock = false;
+    if (output_ && audioClockActive_) {
         if (auto c = output_->clock()) {
             elapsed = static_cast<Tick>((c->positionSeconds - clockStartSeconds_) *
                                         static_cast<double>(kTickRate));
+            haveClock = true;
         }
-    } else {
-        elapsed = static_cast<Tick>(wallClock_.elapsed() * (kTickRate / 1000));
     }
+    if (!haveClock)
+        elapsed = static_cast<Tick>(wallClock_.elapsed() * (kTickRate / 1000));
 
     Tick tick = playStartTick_ + elapsed;
     if (timelineDuration_ > 0 && tick >= timelineDuration_) {

@@ -4,6 +4,7 @@
 // a sequential scan — the frame-accuracy guarantee the whole editor sits on.
 
 #include <velocity/media/probe.h>
+#include <velocity/media/sequential_reader.h>
 #include <velocity/media/video_decoder.h>
 
 #include <gtest/gtest.h>
@@ -141,4 +142,28 @@ TEST(Decoder, HardwareDecodeMatchesSoftware) {
     const auto swPts = sequentialPtsScan(file);
     auto hwPts = sequentialPtsScan(file, hw);
     EXPECT_EQ(swPts, hwPts);
+}
+
+// Sub-frame requests must serve the cached frame, not decode ahead: the UI
+// updates the playhead at ~60 Hz over 30 fps media, so a pts inside the
+// last frame's display interval has to return that same frame (regression:
+// it used to decode and return the NEXT frame, one frame early, every tick).
+TEST(SequentialReader, SubFrameRequestsReuseTheCachedFrame) {
+    auto dec = VideoDecoder::open(testMedia("counting_30fps.mp4"));
+    ASSERT_TRUE(dec.hasValue());
+    SequentialFrameReader reader(std::move(dec.value()));
+
+    auto f0 = reader.at(0);
+    ASSERT_TRUE(f0.hasValue()) << f0.error().message;
+    ASSERT_GT(f0->duration(), 0);
+    const std::int64_t pts0 = f0->pts();
+    const std::int64_t dur = f0->duration();
+
+    // Anywhere inside frame 0's interval → frame 0 again.
+    EXPECT_EQ(reader.at(pts0 + dur / 2)->pts(), pts0);
+    EXPECT_EQ(reader.at(pts0 + dur - 1)->pts(), pts0);
+    // First tick of the next interval → frame 1 exactly.
+    EXPECT_EQ(reader.at(pts0 + dur)->pts(), pts0 + dur);
+    // And moving backwards inside frame 1 must not rewind to frame 0.
+    EXPECT_EQ(reader.at(pts0 + dur + 1)->pts(), pts0 + dur);
 }
