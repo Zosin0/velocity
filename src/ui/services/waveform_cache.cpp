@@ -15,7 +15,7 @@ namespace velocity::ui {
 
 WaveformCache::WaveformCache(QObject* parent) : QObject(parent) {}
 
-const QVector<float>* WaveformCache::peaksFor(const std::filesystem::path& asset) {
+const StereoPeaks* WaveformCache::peaksFor(const std::filesystem::path& asset) {
     const QString key = QString::fromStdWString(asset.wstring());
     if (auto it = cache_.constFind(key); it != cache_.constEnd())
         return &it.value();
@@ -27,7 +27,7 @@ const QVector<float>* WaveformCache::peaksFor(const std::filesystem::path& asset
 }
 
 void WaveformCache::generate(const QString& key) {
-    auto future = QtConcurrent::run([key]() -> QVector<float> {
+    auto future = QtConcurrent::run([key]() -> StereoPeaks {
         const std::filesystem::path path(key.toStdWString());
 
         auto probeRes = media::probe(path);
@@ -45,22 +45,27 @@ void WaveformCache::generate(const QString& key) {
 
         constexpr int kBin = kTickRate / kBinsPerSecond; // samples per bin
         const auto binCount = static_cast<int>((totalSamples + kBin - 1) / kBin);
-        QVector<float> peaks(binCount, 0.0f);
+        StereoPeaks peaks;
+        peaks.left.resize(binCount);
+        peaks.right.resize(binCount);
 
         std::vector<float> block(static_cast<size_t>(kBin) * 2);
         for (int b = 0; b < binCount; ++b) {
             if (!(*dec)->readAt(static_cast<std::int64_t>(b) * kBin, block.data(), kBin))
                 break;
-            float peak = 0.0f;
-            for (float s : block)
-                peak = std::max(peak, std::abs(s));
-            peaks[b] = std::min(peak, 1.0f);
+            float peakL = 0.0f, peakR = 0.0f;
+            for (int i = 0; i < kBin; ++i) {
+                peakL = std::max(peakL, std::abs(block[static_cast<size_t>(i) * 2]));
+                peakR = std::max(peakR, std::abs(block[static_cast<size_t>(i) * 2 + 1]));
+            }
+            peaks.left[b] = std::min(peakL, 1.0f);
+            peaks.right[b] = std::min(peakR, 1.0f);
         }
         return peaks;
     });
 
-    auto* watcher = new QFutureWatcher<QVector<float>>(this);
-    connect(watcher, &QFutureWatcher<QVector<float>>::finished, this, [this, watcher, key] {
+    auto* watcher = new QFutureWatcher<StereoPeaks>(this);
+    connect(watcher, &QFutureWatcher<StereoPeaks>::finished, this, [this, watcher, key] {
         cache_[key] = watcher->result();
         inFlight_[key] = false;
         watcher->deleteLater();

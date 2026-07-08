@@ -20,8 +20,8 @@
 
 namespace velocity::ui {
 
-ExportDialog::ExportDialog(engine::SnapshotPtr snapshot, QWidget* parent)
-    : QDialog(parent), snapshot_(std::move(snapshot)) {
+ExportDialog::ExportDialog(engine::SnapshotPtr snapshot, float masterGain, QWidget* parent)
+    : QDialog(parent), snapshot_(std::move(snapshot)), masterGain_(masterGain) {
     setWindowTitle("Export Video");
     setModal(true);
     setMinimumWidth(480);
@@ -155,6 +155,7 @@ void ExportDialog::startExport() {
     settings.height = res.height();
     settings.videoBitrate = qualityCombo_->currentData().toLongLong();
     settings.preferHardwareEncoder = hwEncodeCheck_->isChecked();
+    settings.masterGain = masterGain_; // what you hear is what you export
 
     exporting_ = true;
     cancelRequested_.store(false);

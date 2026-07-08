@@ -1,4 +1,4 @@
-#include "mainwindow.h"
+﻿#include "mainwindow.h"
 #include "documentsession.h"
 #include <spdlog/spdlog.h>
 #include "../bin/media_bin_widget.h"
@@ -8,6 +8,7 @@
 #include "../mixer/mixer_widget.h"
 #include "../exportdlg/export_dialog.h"
 #include "../playback/playback_controller.h"
+#include "icons.h"
 #include "theming.h"
 
 #include <velocity/engine/project_io.h>
@@ -33,7 +34,7 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
 {
     // Configure window basic properties
-    resize(1280, 720);
+    resize(1440, 860);
     
     // 1. Initialize Document Session + real playback engine (audio-master clock)
     session_ = new DocumentSession(this);
@@ -53,7 +54,7 @@ MainWindow::MainWindow(QWidget* parent)
     // 4. Wire playback state into the UI
     mixer_->attachPlayback(playback_);
     connect(playback_, &PlaybackController::playStateChanged, this, [this](bool playing) {
-        playPauseAction_->setText(playing ? "⏸ Pause" : "▶ Play");
+        playPauseAction_->setText(playing ? "â¸ Pause" : "â–¶ Play");
     });
 
     connect(session_, &DocumentSession::snapshotChanged, this, [this](const engine::SnapshotPtr&) {
@@ -65,7 +66,7 @@ MainWindow::MainWindow(QWidget* parent)
 void MainWindow::updateTitle() {
     const QString name = projectPath_.isEmpty() ? "Untitled Project"
                                                 : QFileInfo(projectPath_).completeBaseName();
-    setWindowTitle(QString("%1%2 — Velocity").arg(name, dirty_ ? "*" : ""));
+    setWindowTitle(QString("%1%2 â€” Velocity").arg(name, dirty_ ? "*" : ""));
 }
 
 void MainWindow::setupMenus() {
@@ -81,7 +82,7 @@ void MainWindow::setupMenus() {
     auto* saveAct = projectMenu->addAction("&Save Project", this, &MainWindow::onSaveProject);
     saveAct->setShortcut(QKeySequence::Save);
 
-    auto* saveAsAct = projectMenu->addAction("Save Project &As…", this, &MainWindow::onSaveProjectAs);
+    auto* saveAsAct = projectMenu->addAction("Save Project &Asâ€¦", this, &MainWindow::onSaveProjectAs);
     saveAsAct->setShortcut(QKeySequence::SaveAs);
 
     projectMenu->addSeparator();
@@ -91,59 +92,85 @@ void MainWindow::setupMenus() {
 
     // Edit Menu
     auto* editMenu = menuBar()->addMenu("&Edit");
-    
-    auto* undoAct = editMenu->addAction("&Undo", this, [this]() { session_->undo(); });
+
+    auto* undoAct = editMenu->addAction(icons::icon("undo"), "&Undo", this,
+                                        [this]() { session_->undo(); });
     undoAct->setShortcut(QKeySequence::Undo);
-    
-    auto* redoAct = editMenu->addAction("&Redo", this, [this]() { session_->redo(); });
+
+    auto* redoAct = editMenu->addAction(icons::icon("redo"), "&Redo", this,
+                                        [this]() { session_->redo(); });
     redoAct->setShortcut(QKeySequence::Redo);
 
     editMenu->addSeparator();
 
-    auto* splitAct = editMenu->addAction("&Split Clip", this, [this]() {
-        session_->splitClipAtPlayhead();
-    });
+    auto* splitAct = editMenu->addAction(icons::icon("split"), "&Split Clip", this,
+                                         [this]() { session_->splitClipAtPlayhead(); });
     splitAct->setShortcut(QKeySequence(Qt::Key_S));
 
-    auto* deleteAct = editMenu->addAction("&Delete Clip", this, [this]() {
-        session_->deleteSelectedClip();
-    });
+    auto* detachAct = editMenu->addAction(icons::icon("detach"), "De&tach Audio", this,
+                                          [this]() { session_->detachAudioFromSelectedClip(); });
+    detachAct->setShortcut(QKeySequence("Ctrl+Shift+D"));
+
+    auto* deleteAct = editMenu->addAction(icons::icon("trash"), "&Delete Clip", this,
+                                          [this]() { session_->deleteSelectedClip(); });
     deleteAct->setShortcut(QKeySequence(Qt::Key_Delete));
 
-    // View Menu
-    auto* viewMenu = menuBar()->addMenu("&View");
-    viewMenu->addAction("Reset Workspace", this, [this]() {
-        // Reset docks to default layout
-        QMessageBox::information(this, "Workspace", "Workspace layout reset to professional preset.");
-    });
+    // Timeline Menu
+    auto* timelineMenu = menuBar()->addMenu("&Timeline");
+    timelineMenu->addAction(icons::icon("plus"), "Add &Video Track", this,
+                            [this]() { session_->addTrack(engine::TrackKind::video); });
+    timelineMenu->addAction(icons::icon("plus"), "Add &Audio Track", this,
+                            [this]() { session_->addTrack(engine::TrackKind::audio); });
+    timelineMenu->addSeparator();
+    timelineMenu->addAction(icons::icon("zoom-in"), "Zoom &In", this,
+                            [this]() { timeline_->zoomIn(); });
+    timelineMenu->addAction(icons::icon("zoom-out"), "Zoom &Out", this,
+                            [this]() { timeline_->zoomOut(); });
+    auto* fitAct = timelineMenu->addAction(icons::icon("zoom-fit"), "Zoom to &Fit", this,
+                                           [this]() { timeline_->zoomToFit(); });
+    fitAct->setShortcut(QKeySequence("Shift+Z"));
 }
 
 void MainWindow::setupToolbar() {
     auto* toolbar = addToolBar("Main Toolbar");
+    toolbar->setObjectName("MainToolbar");
     toolbar->setMovable(false);
     toolbar->setIconSize(QSize(16, 16));
+    toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
 
-    // Import/Export buttons
-    toolbar->addAction("Import", this, [this]() {
-        // Triggers import dialog on media bin
-        mediaBin_->onImportClicked();
-    });
-    toolbar->addAction("Export Video", this, &MainWindow::onExportVideo);
-    
+    auto addTool = [&](const char* iconName, const QString& text, const QString& tip,
+                       auto&& slot) {
+        QAction* act = toolbar->addAction(icons::icon(iconName), text, this,
+                                          std::forward<decltype(slot)>(slot));
+        act->setToolTip(tip);
+        return act;
+    };
+
+    addTool("import", "Import", "Import media files into the project",
+            [this]() { mediaBin_->onImportClicked(); });
+    addTool("export", "Export", "Export the timeline as MP4",
+            [this]() { onExportVideo(); });
+
     toolbar->addSeparator();
 
-    // Edit actions
-    toolbar->addAction("Undo", this, [this]() { session_->undo(); });
-    toolbar->addAction("Redo", this, [this]() { session_->redo(); });
-    toolbar->addAction("Split (S)", this, [this]() { session_->splitClipAtPlayhead(); });
-    toolbar->addAction("Delete", this, [this]() { session_->deleteSelectedClip(); });
+    addTool("undo", "", "Undo (Ctrl+Z)", [this]() { session_->undo(); });
+    addTool("redo", "", "Redo (Ctrl+Shift+Z)", [this]() { session_->redo(); });
 
     toolbar->addSeparator();
 
-    // Zooming
-    toolbar->addAction("Zoom In", this, [this]() { timeline_->zoomIn(); });
-    toolbar->addAction("Zoom Out", this, [this]() { timeline_->zoomOut(); });
-    toolbar->addAction("Zoom Fit", this, [this]() { timeline_->zoomToFit(); });
+    addTool("split", "Split", "Split the clip at the playhead (S)",
+            [this]() { session_->splitClipAtPlayhead(); });
+    addTool("detach", "Detach Audio", "Separate audio from the selected video clip",
+            [this]() { session_->detachAudioFromSelectedClip(); });
+    addTool("trash", "", "Delete the selected clip (Del)",
+            [this]() { session_->deleteSelectedClip(); });
+
+    toolbar->addSeparator();
+
+    addTool("zoom-in", "", "Zoom in (Ctrl+Wheel)", [this]() { timeline_->zoomIn(); });
+    addTool("zoom-out", "", "Zoom out", [this]() { timeline_->zoomOut(); });
+    addTool("zoom-fit", "", "Zoom to fit the whole timeline",
+            [this]() { timeline_->zoomToFit(); });
 }
 
 void MainWindow::setupDocks() {
@@ -164,42 +191,44 @@ void MainWindow::setupDocks() {
     transportLayout->setContentsMargins(0, 0, 0, 0);
     transportLayout->setSpacing(8);
 
-    auto* toStartBtn = new QPushButton("⏮", centralWidget);
-    toStartBtn->setToolTip("Go to Start");
-    toStartBtn->setFixedWidth(32);
+    auto makeTransportBtn = [&](const char* iconName, const QString& tip) {
+        auto* btn = new QPushButton(centralWidget);
+        btn->setIcon(icons::icon(iconName));
+        btn->setToolTip(tip);
+        btn->setFixedSize(34, 28);
+        btn->setProperty("transport", true);
+        return btn;
+    };
+
+    auto* toStartBtn = makeTransportBtn("skip-start", "Go to start");
     connect(toStartBtn, &QPushButton::clicked, this, [this]() { session_->setPlayhead(0); });
     transportLayout->addWidget(toStartBtn);
 
-    auto* prevFrameBtn = new QPushButton("◀", centralWidget);
-    prevFrameBtn->setToolTip("Previous Frame");
-    prevFrameBtn->setFixedWidth(32);
+    auto* prevFrameBtn = makeTransportBtn("frame-prev", "Previous frame");
     connect(prevFrameBtn, &QPushButton::clicked, this, &MainWindow::onStepBackward);
     transportLayout->addWidget(prevFrameBtn);
 
-    playPauseAction_ = new QAction("▶ Play", this);
+    playPauseAction_ = new QAction("Play", this);
     playPauseAction_->setShortcut(QKeySequence(Qt::Key_Space));
     addAction(playPauseAction_); // window-wide Space shortcut
-    auto* playBtn = new QPushButton("▶ Play", centralWidget);
-    playBtn->setFixedWidth(64);
+    auto* playBtn = makeTransportBtn("play", "Play / pause (Space)");
+    playBtn->setFixedSize(44, 28);
     connect(playBtn, &QPushButton::clicked, playPauseAction_, &QAction::trigger);
     connect(playPauseAction_, &QAction::changed, this, [playBtn, this]() {
-        playBtn->setText(playPauseAction_->text());
+        playBtn->setIcon(
+            icons::icon(playPauseAction_->text() == "Pause" ? "pause" : "play"));
     });
     connect(playPauseAction_, &QAction::triggered, this,
             [this]() { playback_->togglePlayPause(); });
     transportLayout->addWidget(playBtn);
 
-    auto* stopBtn = new QPushButton("⏹", centralWidget);
-    stopBtn->setToolTip("Stop (return to play start)");
-    stopBtn->setFixedWidth(32);
+    auto* stopBtn = makeTransportBtn("stop", "Stop (return to play start)");
     connect(stopBtn, &QPushButton::clicked, this, [this]() { playback_->stop(); });
     transportLayout->addWidget(stopBtn);
 
     loopAction_ = new QAction("Loop", this);
     loopAction_->setCheckable(true);
-    auto* loopBtn = new QPushButton("🔁", centralWidget);
-    loopBtn->setToolTip("Loop playback");
-    loopBtn->setFixedWidth(32);
+    auto* loopBtn = makeTransportBtn("loop", "Loop playback");
     loopBtn->setCheckable(true);
     connect(loopBtn, &QPushButton::toggled, this, [this](bool on) {
         loopAction_->setChecked(on);
@@ -207,21 +236,20 @@ void MainWindow::setupDocks() {
     });
     transportLayout->addWidget(loopBtn);
 
-    auto* nextFrameBtn = new QPushButton("▶", centralWidget);
-    nextFrameBtn->setToolTip("Next Frame");
-    nextFrameBtn->setFixedWidth(32);
+    auto* nextFrameBtn = makeTransportBtn("frame-next", "Next frame");
     connect(nextFrameBtn, &QPushButton::clicked, this, &MainWindow::onStepForward);
     transportLayout->addWidget(nextFrameBtn);
 
     // Timecode readout
-    auto* timecodeLabel = new QLabel("00:00:00:00", centralWidget);
-    timecodeLabel->setStyleSheet("font-family: monospace; font-size: 14px; font-weight: bold; color: #10b981; padding-left: 10px;");
+    auto* timecodeLabel = new QLabel("00:00.00", centralWidget);
+    timecodeLabel->setStyleSheet("font-family: Consolas, monospace; font-size: 14px; "
+                                 "font-weight: bold; color: #10b981; padding-left: 10px;");
     connect(session_, &DocumentSession::playheadChanged, this, [timecodeLabel](Tick t) {
-        double seconds = static_cast<double>(t) / kTickRate;
-        int mins = static_cast<int>(seconds) / 60;
-        int secs = static_cast<int>(seconds) % 60;
-        int msecs = static_cast<int>((seconds - std::floor(seconds)) * 100);
-        timecodeLabel->setText(QString::asprintf("%02d:%02d:%02d.%02d", 0, mins, secs, msecs));
+        const double seconds = static_cast<double>(t) / kTickRate;
+        const int mins = static_cast<int>(seconds) / 60;
+        const int secs = static_cast<int>(seconds) % 60;
+        const int hundredths = static_cast<int>((seconds - std::floor(seconds)) * 100);
+        timecodeLabel->setText(QString::asprintf("%02d:%02d.%02d", mins, secs, hundredths));
     });
     transportLayout->addWidget(timecodeLabel);
     transportLayout->addStretch();
@@ -271,7 +299,7 @@ void MainWindow::setupStatusBar() {
     auto* fpsLabel = new QLabel("FPS: 30.00 |", this);
     bar->addPermanentWidget(fpsLabel);
 
-    auto* resLabel = new QLabel("Format: 1920×1080 |", this);
+    auto* resLabel = new QLabel("Format: 1920Ã—1080 |", this);
     bar->addPermanentWidget(resLabel);
 
     auto* hardwareLabel = new QLabel("Engine: Direct3D 12 (DirectX Hardware Acceleration) |", this);
@@ -293,7 +321,7 @@ void MainWindow::onNewProject() {
         connect(session_, &DocumentSession::errorOccurred, this, &MainWindow::onShowError);
         playback_ = new PlaybackController(session_, this);
         connect(playback_, &PlaybackController::playStateChanged, this, [this](bool playing) {
-            playPauseAction_->setText(playing ? "⏸ Pause" : "▶ Play");
+            playPauseAction_->setText(playing ? "â¸ Pause" : "â–¶ Play");
         });
         
         // Re-inject session pointers
@@ -360,8 +388,8 @@ void MainWindow::onOpenProject() {
         return;
     }
 
-    // Warn (but proceed) when referenced media is missing — clips stay
-    // editable as offline placeholders (docs/03 §4).
+    // Warn (but proceed) when referenced media is missing â€” clips stay
+    // editable as offline placeholders (docs/03 Â§4).
     QStringList missing;
     for (const auto& track : (*loaded)->tracks)
         for (const auto& clip : track->clips)
@@ -422,7 +450,7 @@ void MainWindow::onExportVideo() {
         return;
     }
 
-    ExportDialog dialog(seq, this);
+    ExportDialog dialog(seq, playback_->masterGain(), this);
     dialog.exec();
 }
 

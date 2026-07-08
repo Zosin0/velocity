@@ -24,7 +24,9 @@ class ExportDialog : public QDialog {
 
 public:
     // Captures the snapshot at open time; immutability makes the worker safe.
-    explicit ExportDialog(engine::SnapshotPtr snapshot, QWidget* parent = nullptr);
+    // masterGain mirrors the mixer's master fader so exports match playback.
+    explicit ExportDialog(engine::SnapshotPtr snapshot, float masterGain = 1.0f,
+                          QWidget* parent = nullptr);
     ~ExportDialog() override;
 
 signals:
@@ -43,6 +45,7 @@ private:
                                        const engine::ExportSettings& settings) const;
 
     engine::SnapshotPtr snapshot_;
+    float masterGain_ = 1.0f;
 
     QLineEdit* pathEdit_;
     QComboBox* resolutionCombo_;
