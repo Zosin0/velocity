@@ -1,4 +1,4 @@
-# Velocity — Native High-Performance Video Editor for Windows
+# Velocity: Native High-Performance Video Editor for Windows - v1.0.0
 
 > Working title "Velocity". A native C++20 / Direct3D 12 / FFmpeg non-linear video editor
 > targeting content creators, with the ambition of CapCut usability on a
