@@ -6,6 +6,7 @@
 #include <velocity/engine/model.h>
 #include <velocity/foundation/expected.h>
 
+#include <functional>
 #include <string>
 
 namespace velocity::engine {
@@ -37,6 +38,51 @@ EditResult moveClip(const SnapshotPtr& seq, size_t trackIdx, ClipId id, Tick new
 EditResult trimClipHead(const SnapshotPtr& seq, size_t trackIdx, ClipId id, Tick newStart);
 EditResult trimClipTail(const SnapshotPtr& seq, size_t trackIdx, ClipId id, Tick newEnd);
 
+// Generic property edit: copies the clip, lets `mutate` adjust it, then
+// revalidates track invariants. Placement fields may be changed too; overlap
+// rules still apply. Used by the inspector for gain/fades/transform edits.
+EditResult updateClip(const SnapshotPtr& seq, size_t trackIdx, ClipId id,
+                      const std::function<void(Clip&)>& mutate);
+
+// Moves a clip to a different track (same kind only); fails on overlap.
+EditResult moveClipToTrack(const SnapshotPtr& seq, size_t fromTrack, ClipId id, size_t toTrack,
+                           Tick newStart);
+
+// ---- Link-group aware edits (docs/02 §5 semantics: one edit, one snapshot).
+// A/V clips imported from one file share a linkGroup; these operate on every
+// active member so cuts/moves/deletes never desynchronize audio from video.
+
+// All active members of the clip's link group, including the clip itself.
+// A clip with no active link yields just itself. Empty when id is unknown.
+std::vector<std::pair<size_t, ClipPtr>> linkedMembers(const Sequence& seq, ClipId id);
+
+// Splits every group member whose body strictly contains `at`. The two halves
+// of each member stay linked; both new right halves form a new link group.
+EditResult splitClipLinked(const SnapshotPtr& seq, ClipId id, Tick at);
+
+// Removes the clip and every active group member.
+EditResult removeClipLinked(const SnapshotPtr& seq, ClipId id);
+
+// Moves the whole group by (newStart - anchor clip's dstStart).
+EditResult moveClipLinked(const SnapshotPtr& seq, ClipId id, Tick newStart);
+
+// Trims every member that shares the anchor's edge to the same new boundary.
+EditResult trimClipLinkedHead(const SnapshotPtr& seq, ClipId id, Tick newStart);
+EditResult trimClipLinkedTail(const SnapshotPtr& seq, ClipId id, Tick newEnd);
+
+// Suspends the A/V link on the whole group (keeps ids as sync metadata).
+EditResult detachLink(const SnapshotPtr& seq, ClipId id);
+
+// ---- Track management. Video tracks insert after the last video track;
+// audio tracks append at the end. Names are auto-assigned (V3, A2, …).
+EditResult addTrack(const SnapshotPtr& seq, TrackKind kind);
+EditResult removeTrack(const SnapshotPtr& seq, size_t trackIdx);
+
+// Track property edit (mute/hide/lock/gain/rename). Not blocked by `locked`
+// — locking guards clips, not the track's own controls.
+EditResult updateTrack(const SnapshotPtr& seq, size_t trackIdx,
+                       const std::function<void(Track&)>& mutate);
+
 // Bounded linear undo/redo over snapshots. Structural sharing keeps retained
 // snapshots cheap; the memory-budget valve (docs/02 §5) is future work.
 class UndoStack {
@@ -51,6 +97,16 @@ public:
         states_.resize(index_ + 1); // drop redo branch
         states_.push_back(std::move(next));
         ++index_;
+    }
+    // Replaces the newest state in place: used by interactive gestures
+    // (drag/trim/slider) so one gesture == one undo entry (docs/02 §5).
+    void replaceTop(SnapshotPtr next) {
+        if (index_ == 0) {
+            push(std::move(next));
+            return;
+        }
+        states_.resize(index_ + 1);
+        states_[index_] = std::move(next);
     }
     const SnapshotPtr& undo() {
         if (canUndo())

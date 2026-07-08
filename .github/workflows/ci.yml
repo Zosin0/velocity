@@ -27,12 +27,14 @@ jobs:
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2019_64'
+          setup-python: false
 
       - name: Configure
         shell: powershell
         run: |
           . tools/devshell.ps1
-          cmake --preset release
+          # install-qt-action exports QT_ROOT_DIR pointing at the arch prefix.
+          cmake -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" --preset release
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Build
@@ -52,5 +54,79 @@ jobs:
       - name: Launch smoke check
         shell: powershell
         run: |
-          ./build/release/bin/velocity.exe
+          # --smoke spins the full UI event loop for ~3 s then exits 0.
+          ./build/release/bin/velocity.exe --smoke
           if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Debug build output
+        shell: powershell
+        run: |
+          Write-Host "Current directory:"
+          Get-Location
+
+          Write-Host "`nBuild directory:"
+          if (Test-Path build) {
+            Get-ChildItem build -Recurse
+          } else {
+            Write-Host "build directory does not exist"
+          }
+
+      - name: Package portable app
+        shell: powershell
+        run: |
+          $BinDir = "build/release/bin"
+
+          if (!(Test-Path $BinDir)) {
+            Write-Error "$BinDir not found."
+            exit 1
+          }
+
+          $Files = Get-ChildItem $BinDir
+
+          if ($Files.Count -eq 0) {
+            Write-Error "$BinDir is empty."
+            exit 1
+          }
+
+          Compress-Archive `
+            -Path "$BinDir\*" `
+            -DestinationPath velocity-windows-x64.zip `
+            -Force
+
+      - name: Upload portable app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: velocity-windows-x64
+          path: velocity-windows-x64.zip
+          retention-days: 14
+
+  release-publish:
+    needs: build-test
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bump version and push tag
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+          tag_prefix: v
+
+      - name: Download portable app artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: velocity-windows-x64
+          path: .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag_version.outputs.new_tag }}
+          name: Release ${{ steps.tag_version.outputs.new_tag }}
+          files: velocity-windows-x64.zip
+          generate_release_notes: true

@@ -252,6 +252,27 @@ Expected<void, MediaError> Mp4Writer::writeVideoFrame(const VideoFrame& frame) {
     return im.encodeVideo(im.encFrame);
 }
 
+Expected<void, MediaError> Mp4Writer::writeRgbaFrame(const std::uint8_t* rgba, int width,
+                                                     int height, int strideBytes) {
+    Impl& im = *impl_;
+
+    im.sws = sws_getCachedContext(im.sws, width, height, AV_PIX_FMT_RGBA, im.fmt.width,
+                                  im.fmt.height, AV_PIX_FMT_YUV420P, SWS_BILINEAR, nullptr,
+                                  nullptr, nullptr);
+    if (!im.sws)
+        return makeUnexpected(mediaErr(MediaErrorKind::unsupported, "sws context"));
+
+    if (av_frame_make_writable(im.encFrame) < 0)
+        return makeUnexpected(mediaErr(MediaErrorKind::io, "video frame writable"));
+
+    const std::uint8_t* srcData[4] = {rgba, nullptr, nullptr, nullptr};
+    const int srcStride[4] = {strideBytes, 0, 0, 0};
+    sws_scale(im.sws, srcData, srcStride, 0, height, im.encFrame->data, im.encFrame->linesize);
+
+    im.encFrame->pts = im.videoPts++;
+    return im.encodeVideo(im.encFrame);
+}
+
 Expected<void, MediaError> Mp4Writer::writeBlackFrame() {
     Impl& im = *impl_;
     if (av_frame_make_writable(im.encFrame) < 0)
